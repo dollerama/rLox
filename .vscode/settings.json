@@ -1,0 +1,15 @@
+{
+    "rust-analyzer.linkedProjects": [
+        "./Cargo.toml",
+        "./Cargo.toml",
+        "./Cargo.toml",
+        "./LoxBind/Cargo.toml",
+        "./lox_bind/Cargo.toml",
+        "./lox_bind/Cargo.toml",
+        "./lox_bind/Cargo.toml",
+        "./lox_bind/Cargo.toml",
+        "./lox_bind/Cargo.toml",
+        "./lox_bind/Cargo.toml"
+    ],
+    "rust-analyzer.showUnlinkedFileNotification": false
+}
