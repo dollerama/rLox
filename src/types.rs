@@ -9,6 +9,20 @@ use crate::statements::*;
 
 pub type RuntimeError<T> = Result<T, (Token, String)>;
 
+#[derive(Clone, Debug)]
+pub enum LoopType {
+    While,
+    For,
+    ForEach
+}
+
+#[derive(Clone, Debug)]
+pub enum FunctionType {
+    Normal,
+    Method,
+    Anon
+}
+
 pub trait LoxCallable : std::fmt::Debug  {
     fn arity(&self) -> usize;
     fn call(&self, interpreter : &mut Interpreter, arguments : Vec<Option<Literal>>, auto_clean : bool) -> RuntimeError<Option<Literal>>;
@@ -39,6 +53,7 @@ pub trait StmtVisitor {
     
 pub trait ExprVisitor {
     fn visit_binary_expr(&mut self, expr : &Binary) -> RuntimeError<Option<Literal>>;
+    fn visit_ternary_expr(&mut self, expr : &Ternary) -> RuntimeError<Option<Literal>>;
     fn visit_grouping_expr(&mut self, expr : &Grouping) -> RuntimeError<Option<Literal>>;
     fn visit_unary_expr(&mut self, expr : &Unary) -> RuntimeError<Option<Literal>>;
     fn visit_literal_expr(&mut self, expr : &LiteralExp) -> RuntimeError<Option<Literal>>;
@@ -82,14 +97,18 @@ impl Clone for Box<dyn Expr> {
 #[derive(Clone, Debug)]
 pub enum Literal {
     Number(f64),
+    StrongNumber(f64),
     String(String),
+    StrongString(String),
     Boolean(bool),
+    StrongBoolean(bool),
     Function(Box<dyn LoxCallable>),
     Class(Box<LoxClass>),
     Instance(Box<LoxInstance>),
     Return(Box<Literal>),
     Keyword(String),
-    Collection(Vec<Box<Option<Literal>>>)
+    Collection(Vec<Box<Option<Literal>>>),
+    StrongCollection(Vec<Box<Option<Literal>>>)
 }
 
 impl TryFrom<Literal> for i32 {
@@ -174,14 +193,16 @@ impl TryFrom<Literal> for bool {
 pub struct LoxFunction {
     pub declaration : Function,
     pub closure : Environment,
+    pub f_type : FunctionType,
     pub is_init : bool,
 }
 
 impl LoxFunction {
-    pub fn new(declaration : Function, closure : Environment, is_init : bool) -> Self {
+    pub fn new(declaration : Function, closure : Environment, f_type : FunctionType, is_init : bool) -> Self {
         Self {
             declaration,
             closure,
+            f_type,
             is_init
         }
     }
@@ -192,7 +213,8 @@ impl LoxFunction {
             "this".to_string(), 
             Some(Literal::Instance(Box::new(instance.clone())))
         );
-        LoxFunction::new(self.declaration.clone(), environment, self.is_init)
+        
+        LoxFunction::new(self.declaration.clone(), environment, FunctionType::Method, self.is_init)
     }
 }
 
@@ -207,23 +229,24 @@ impl LoxCallable for LoxFunction {
     
     fn call(&self, interpreter : &mut Interpreter, arguments : Vec<Option<Literal>>, auto_clean : bool) -> RuntimeError<Option<Literal>> {
         let mut environment = self.closure.clone();
-        let mut previous = None;
-        if auto_clean {
-            previous = Some(interpreter.environment.clone());
-        }
+        environment.enclosing = Some(Box::new(interpreter.environment.clone()));
+
+        interpreter.environment = Environment::new_with_enclosing(environment.clone());
         
         for i in 0..self.declaration.params.len() {
-            environment.define(self.declaration.params[i].lexeme.clone(), arguments[i].clone());
+            interpreter.environment.define(self.declaration.params[i].lexeme.clone(), arguments[i].clone());
         }
         
-        let res = interpreter.execute_block(&self.declaration.body, environment.clone())?;
+        let res = interpreter.execute_block(&self.declaration.body, interpreter.environment.clone())?;
         
         if self.is_init {
             match interpreter.environment
             .get(Token::new(TokenType::Identifier, "this", None, self.declaration.name.line)) {
                 Ok(Some(v)) => {
-                    if let Some(prev) = previous {
-                        interpreter.environment = prev;
+                    if auto_clean {
+                        if let Some(prev) = interpreter.environment.clone().enclosing {
+                            interpreter.environment = *prev;
+                        }
                     }
                     Ok(Some(Literal::Return(Box::new(v))))
                 },
@@ -236,8 +259,10 @@ impl LoxCallable for LoxFunction {
             }
         }
         else {
-            if let Some(prev) = previous {
-                interpreter.environment = prev;
+            if auto_clean {
+                if let Some(prev) = interpreter.environment.clone().enclosing {
+                    interpreter.environment = *prev;
+                }
             }
             
             Ok(res)

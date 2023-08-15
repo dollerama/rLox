@@ -143,15 +143,15 @@ impl Var {
 pub struct While {
     pub condition : Box<dyn Expr>,
     pub body : Box<dyn Stmt>,
-    pub is_for_loop : bool
+    pub loop_type : LoopType
 }
 
 impl While {
-    pub fn new(condition : Box<dyn Expr>, body : Box<dyn Stmt>, is_for_loop : bool) -> Self {
+    pub fn new(condition : Box<dyn Expr>, body : Box<dyn Stmt>, loop_type : LoopType) -> Self {
         Self {
             condition,
             body,
-            is_for_loop
+            loop_type
         }
     }
 }

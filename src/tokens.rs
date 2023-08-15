@@ -7,7 +7,7 @@ pub enum TokenType {
     LeftBrace, RightBrace,
     LeftBracket, RightBracket,
     Comma, Dot, Minus, Plus, Semicolon, Colon, Slash, Star,
-    Mod, Hash,
+    Mod, 
 
     //One Or two character tokens
     Bang, BangEqual,
@@ -16,13 +16,14 @@ pub enum TokenType {
     Less, LessEqual, Incr, 
     Decr, PlusEqual, MinusEqual,
     StarEqual, SlashEqual, 
-    ModEqual,
+    ModEqual, Hash, Lambda, 
+    Pipe, Question,
     
     //Literals
-    Identifier, String, Number,
+    Identifier, String, Number, Bool,
     
     //keywords
-    And, Class, Else, ElseIf, False, Fn, For, If, Nil, Or,
+    And, Class, Else, ElseIf, False, Fn, For, If, Nil, Or, 
     Print, Return, Super, This, True, Var, While, Break, Continue,
     
     Eof

@@ -1,3 +1,4 @@
+use crate::environment::Environment;
 use crate::types::*;
 use crate::tokens::*;
 use crate::expressions::*;
@@ -223,6 +224,14 @@ impl Parser {
     pub fn or(&mut self) -> RuntimeError<Box<dyn Expr>> {
         let mut expr = self.and()?;
         
+        if self.try_match(vec!(TokenType::Question)) {
+            let operator_a = self.previous();
+            let left = self.and()?;
+            let operator_b = self.consume(TokenType::Colon, "Expect ':'.")?;
+            let right = self.and()?;
+            return Ok(Box::new(Ternary::new(expr, operator_a, left, operator_b, right)));
+        }
+        
         while self.try_match(vec!(TokenType::Or)) {
             let operator = self.previous();
             let right = self.and()?;
@@ -402,6 +411,12 @@ impl Parser {
         else if self.try_match(vec!(TokenType::Identifier)) {
             Ok(Box::new(VarExpr::new(self.previous())))
         }
+        else if self.try_match(vec!(TokenType::Pipe)) {
+            match self.anon() {
+                Ok(v) => Ok(v),
+                Err((e, v)) => return Err((e, v))
+            }
+        }
         else {
             self.error(self.peek(), "Expect expression.");
             Ok(Box::new(LiteralExp::new(None)))
@@ -503,6 +518,73 @@ impl Parser {
         
         Ok(Box::new(Function::new(name, parameters, body)))
     }
+
+    pub fn anon(&mut self) -> RuntimeError<Box<dyn Expr>> {
+        let mut parameters = Vec::new();
+        
+        if !self.check(TokenType::Pipe) {
+            loop {
+                if parameters.len() >= 255 {
+                    self.error(self.peek(), "Can't have mOre than 255 parameters.");
+                }
+                
+                parameters.push(self.consume(TokenType::Identifier, "Expect parameter name.")?);
+                
+                if !self.try_match(vec!(TokenType::Comma)) {
+                    break;
+                }
+            } 
+        }
+        self.consume(TokenType::Pipe, "Expect '|' after parameters.")?;
+        
+        self.consume(TokenType::LeftBrace, "Expect '{{' before function body.")?;
+    
+        let body = self.block()?;
+        
+        Ok(Box::new(LiteralExp::new(Some(Literal::Function(Box::new(LoxFunction::new(Function::new(Token::new(TokenType::Identifier, "anon", None, 0), parameters, body), Environment::new(), FunctionType::Anon, false)))))))
+    }
+    
+    pub fn anon_lambda(&mut self) -> RuntimeError<Box<dyn Expr>> {
+        let mut parameters = Vec::new();
+        
+        if !self.check(TokenType::Pipe) {
+            loop {
+                if parameters.len() >= 255 {
+                    self.error(self.peek(), "Can't have mOre than 255 parameters.");
+                }
+                
+                parameters.push(self.consume(TokenType::Identifier, "Expect parameter name.")?);
+                
+                if !self.try_match(vec!(TokenType::Comma)) {
+                    break;
+                }
+            } 
+        }
+        self.consume(TokenType::Pipe, "Expect '|' after parameters.")?;
+    
+        let mut body = vec!();
+        
+        if let Some(d) = self.declaration()? {
+            if let Some(exp) = d.as_any().downcast_ref::<StmtExpr>() {
+                body.push(Box::new(
+                    Return::new(
+                        Token::new(
+                            TokenType::Return,
+                            "return",
+                            None,
+                            0
+                        ),
+                        Some(exp.expression.clone())
+                    )
+                ) as Box<dyn Stmt>);
+            }
+            else {
+                body.push(d);
+            }
+        }
+        
+        Ok(Box::new(LiteralExp::new(Some(Literal::Function(Box::new(LoxFunction::new(Function::new(Token::new(TokenType::Identifier, "anon", None, 0), parameters, body), Environment::new(), FunctionType::Anon, false)))))))
+    }
     
     pub fn var_declaration(&mut self) -> RuntimeError<Box<dyn Stmt>> {
         let name = self.consume(TokenType::Identifier, "Expect Variable name.")?;
@@ -510,9 +592,76 @@ impl Parser {
         let mut initializer : Option<Box<dyn Expr>> = None;
         if self.try_match(vec!(TokenType::Equal)) {
             initializer = Some(self.expression()?);
+            self.consume(TokenType::Semicolon, "Expect ';' after Variable declaration.")?;
         }
+        else if self.try_match(vec!(TokenType::Lambda)) {
+            self.consume(TokenType::Pipe, "Expect '|' to declare lambda.")?;
+            match self.anon_lambda() {
+                Ok(v) => {
+                    initializer = Some(v);
+                },
+                Err((e, v)) => return Err((e, v))
+            }
+        }
+        else {
+            self.consume(TokenType::Semicolon, "Expect ';' after Variable declaration.")?;
+        }
+
+        Ok(Box::new(Var::new(name, initializer)))
+    }
+    
+    pub fn type_declaration(&mut self, type_of : TokenType) -> RuntimeError<Box<dyn Stmt>> {
+        let name = self.consume(TokenType::Identifier, "Expect Variable name.")?;
         
-        self.consume(TokenType::Semicolon, "Expect ';' after Variable declaration.")?;
+        let mut initializer : Option<Box<dyn Expr>> = None;
+        if self.try_match(vec!(TokenType::Equal)) {
+            if let Some(exp) = self.expression()?.as_any().downcast_ref::<LiteralExp>() {
+                match type_of {
+                    TokenType::Number => {
+                        if let Some(Literal::Number(a)) = exp.value.clone() {
+                            initializer = 
+                            Some(Box::new(
+                                LiteralExp::new(
+                                    Some(Literal::StrongNumber(a))
+                                )
+                            ));
+                        }
+                        else {
+                            return Err((name.clone(), "Expect number.".to_string()))
+                        }
+                    }
+                    TokenType::Bool => {
+                        if let Some(Literal::Boolean(a)) = exp.value.clone() {
+                            initializer = 
+                            Some(Box::new(
+                                LiteralExp::new(
+                                    Some(Literal::StrongBoolean(a))
+                                )
+                            ));
+                        }
+                        else {
+                            return Err((name.clone(), "Expect boolean.".to_string()))
+                        }
+                    }
+                    TokenType::String => {
+                        if let Some(Literal::String(a)) = exp.value.clone() {
+                            initializer = 
+                            Some(Box::new(
+                                LiteralExp::new(
+                                    Some(Literal::StrongString(a))
+                                )
+                            ));
+                        }
+                        else {
+                            return Err((name.clone(), "Expect string.".to_string()))
+                        }
+                    }
+                    _ => return Err((name.clone(), "Invalid type".to_string()))
+                }
+            }
+            self.consume(TokenType::Semicolon, "Expect ';' after Variable declaration.")?;
+        }
+
         Ok(Box::new(Var::new(name, initializer)))
     }
 
@@ -578,7 +727,10 @@ impl Parser {
     }
     
     pub fn for_statement(&mut self) -> RuntimeError<Box<dyn Stmt>> {
+        let mut loop_type = LoopType::For;
         let mut initializer : Option<Box<dyn Stmt>> = None;
+        let mut initializer2 : Option<Box<dyn Stmt>> = None;
+        
         let mut initializer_alt = None;
         
         if self.try_match(vec!(TokenType::Var)) {
@@ -593,6 +745,7 @@ impl Parser {
         
         let mut condition : Option<Box<dyn Expr>> = None;
         let mut increment : Option<Box<dyn Expr>> = None;
+        let mut increment2 : Option<Box<dyn Expr>> = None;
         
         if !self.check(TokenType::Colon) {
             if !self.check(TokenType::Semicolon) {
@@ -606,74 +759,214 @@ impl Parser {
             }
         }
         else {
+            loop_type = LoopType::ForEach;
+        
             self.consume(TokenType::Colon, "Expect ':' after for intializer.")?;
             let condition_val_alt = self.expression()?;
             
-            initializer = 
-            Some(
-                Box::new(Var::new(
-                    initializer_alt.clone().unwrap(),
-                    Some(
-                        Box::new(LiteralExp::new(
-                            Some(Literal::Number(0.0))
-                        ))
-                    )
-                ))
-            );
+            let condition_val_alt_var = 
+            if let Some(v) = condition_val_alt.as_any().downcast_ref::<Grouping>() {
+                if let Some(v2) = v.expression.as_any().downcast_ref::<Unary>() {
+                    v2.right.clone()
+                }
+                else {
+                    condition_val_alt.clone()
+                }
+            }
+            else if let Some(v) = condition_val_alt.as_any().downcast_ref::<Unary>() {
+                v.right.clone()
+            }
+            else {
+                condition_val_alt.clone()
+            };
+
+            if condition_val_alt_var.as_any().downcast_ref::<LiteralExp>().is_none() {
+                initializer = 
+                Some(
+                    Box::new(Var::new(
+                        initializer_alt.clone().unwrap(),
+                        Some(
+                            Box::new(IndexGet::new(
+                                Token::new(
+                                    TokenType::RightBracket,
+                                    "]",
+                                    None,
+                                    initializer_alt.clone().unwrap().line
+                                ),
+                                Box::new(LiteralExp::new(
+                                    Some(Literal::Number(0.0))
+                                )),
+                                condition_val_alt.clone()
+                            ))
+                        )
+                    ))
+                );
+                
+                initializer2 = 
+                Some(
+                    Box::new(Var::new(
+                        Token::new(
+                            TokenType::Identifier,
+                            "_internal_iterator_lox_exlcusive_",
+                            Some(Literal::Number(0.0)),
+                            initializer_alt.clone().unwrap().line
+                        ),
+                        Some(
+                            Box::new(LiteralExp::new(
+                                Some(Literal::Number(0.0))
+                            ))
+                        )
+                    ))
+                );
             
-            condition = 
-            Some(
-                Box::new(Binary::new(
-                    Box::new(VarExpr::new(
-                        initializer_alt.clone().unwrap()
-                    )),
-                    Token::new(
-                        TokenType::Less,
-                        "<",
-                        None,
-                        initializer_alt.clone().unwrap().line
-                    ),
-                    condition_val_alt
-                ))
-            );
-            increment =
-            Some(
-                Box::new(Assign::new(
-                    initializer_alt.clone().unwrap(),
-                    Box::new(LiteralExp::new(
-                        Some(Literal::Number(1.0))
-                    )),
-                    Some(TokenType::Plus)
-                ))
-            )
+                condition = 
+                Some(
+                    Box::new(Binary::new(
+                        Box::new(VarExpr::new(
+                            Token::new(
+                                TokenType::Identifier,
+                                "_internal_iterator_lox_exlcusive_",
+                                Some(Literal::Number(0.0)),
+                                initializer_alt.clone().unwrap().line
+                            )
+                        )),
+                        Token::new(
+                            TokenType::Less,
+                            "<",
+                            None,
+                            initializer_alt.clone().unwrap().line
+                        ),
+                        Box::new(
+                            Unary::new(
+                                Token::new(
+                                    TokenType::Hash,
+                                    "#",
+                                    None,
+                                    initializer_alt.clone().unwrap().line
+                                ),
+                                condition_val_alt.clone()
+                            )
+                        )
+                    ))
+                );
+                
+                increment2 =
+                Some(
+                    Box::new(Assign::new(
+                        initializer_alt.clone().unwrap(),
+                        Box::new(IndexGet::new(
+                            Token::new(
+                                TokenType::RightBracket,
+                                "]",
+                                None,
+                                initializer_alt.clone().unwrap().line
+                            ),
+                            Box::new(VarExpr::new(
+                                Token::new(
+                                    TokenType::Identifier,
+                                    "_internal_iterator_lox_exlcusive_",
+                                    None,
+                                    initializer_alt.clone().unwrap().line
+                                )
+                            )),
+                            condition_val_alt.clone()
+                        )),
+                        None
+                    ))
+                );
+                
+                increment =
+                Some(
+                    Box::new(Assign::new(
+                        Token::new(
+                            TokenType::Identifier,
+                            "_internal_iterator_lox_exlcusive_",
+                            None,
+                            initializer_alt.clone().unwrap().line
+                        ),
+                        Box::new(LiteralExp::new(
+                            Some(Literal::Number(1.0))
+                        )),
+                        Some(TokenType::Plus)
+                    ))
+                );
+            }
+            else {
+                initializer = 
+                Some(
+                    Box::new(Var::new(
+                        initializer_alt.clone().unwrap(),
+                        Some(
+                            Box::new(LiteralExp::new(
+                                Some(Literal::Number(0.0))
+                            ))
+                        )
+                    ))
+                );
+                
+                condition = 
+                Some(
+                    Box::new(Binary::new(
+                        Box::new(VarExpr::new(
+                            initializer_alt.clone().unwrap()
+                        )),
+                        Token::new(
+                            TokenType::Less,
+                            "<",
+                            None,
+                            initializer_alt.clone().unwrap().line
+                        ),
+                        condition_val_alt_var.clone()
+                    ))
+                );
+                
+                increment =
+                Some(
+                    Box::new(Assign::new(
+                        initializer_alt.clone().unwrap(),
+                        Box::new(LiteralExp::new(
+                            Some(Literal::Number(1.0))
+                        )),
+                        Some(TokenType::Plus)
+                    ))
+                );
+            }
         }
         
         let mut body = self.statement()?;
         
         if let Some(v) = increment {
-            body = Box::new(Block::new(vec!(body, Box::new(StmtExpr::new(v)))));
+            if let Some(v2) = increment2 {
+                body = Box::new(Block::new(vec!(body, Box::new(StmtExpr::new(v)), Box::new(StmtExpr::new(v2)))));
+            }
+            else {
+                body = Box::new(Block::new(vec!(body, Box::new(StmtExpr::new(v)))));
+            }
         }
         
         if let None = condition {
             condition = Some(Box::new(LiteralExp::new(Some(Literal::Boolean(true)))));
         }
         
-        body = Box::new(While::new(condition.unwrap(), body, true));
+        body = Box::new(While::new(condition.unwrap(), body, loop_type));
         
         if let Some(v) = initializer {
-            body = Box::new(Block::new(vec!(v, body)));
+            if let Some(v2) = initializer2 {
+                body = Box::new(Block::new(vec!(v, v2, body)));
+            }
+            else {
+                body = Box::new(Block::new(vec!(v, body)));
+            }    
         }
 
         Ok(body)
     }
     
     pub fn while_statement(&mut self) -> RuntimeError<Box<dyn Stmt>> {
-        self.consume(TokenType::LeftParen, "Expect '(' after 'While'.")?;
         let condition = self.expression()?;
-        self.consume(TokenType::RightParen, "Expect ')' after condition.")?;
         let body = self.statement()?;
         
-        Ok(Box::new(While::new(condition, body, false)))
+        Ok(Box::new(While::new(condition, body, LoopType::While)))
     }
     
     fn print_statement(&mut self) -> RuntimeError<Box<dyn Stmt>> {

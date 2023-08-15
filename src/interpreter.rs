@@ -56,6 +56,24 @@ impl Interpreter {
                     true => println!("{}", n)
                 }
             },
+            Some(Literal::StrongString(s)) => {
+                match new_line {
+                    false => print!("{}", s),
+                    true => println!("{}", s)
+                }
+            },
+            Some(Literal::StrongBoolean(b)) => {
+                match new_line {
+                    false => print!("{}", b),
+                    true => println!("{}", b)
+                }
+            },
+            Some(Literal::StrongNumber(n)) => {
+                match new_line {
+                    false => print!("{}", n),
+                    true => println!("{}", n)
+                }
+            },
             Some(Literal::Function(f)) => {
                 match new_line {
                     false => print!("fn => {:#?}", f),
@@ -88,15 +106,30 @@ impl Interpreter {
                 }
             },
             Some(Literal::Collection(n)) => {
-                print!("[");
-                for i in 0..n.len() {
-                    Self::print_helper(*n[i].clone(), false);
-                    
-                    if i != n.len()-1 {
-                        print!(", ");
+                match new_line {
+                    false => {
+                        print!("[");
+                        for i in 0..n.len() {
+                            Self::print_helper(*n[i].clone(), false);
+                            
+                            if i != n.len()-1 {
+                                print!(", ");
+                            }
+                        }
+                        print!("]");
+                    },
+                    true => {
+                        print!("[");
+                        for i in 0..n.len() {
+                            Self::print_helper(*n[i].clone(), false);
+                            
+                            if i != n.len()-1 {
+                                print!(", ");
+                            }
+                        }
+                        print!("]\n");
                     }
                 }
-                print!("]\n");
             },
             Some(n) => { 
                 match new_line {
@@ -197,14 +230,13 @@ impl Interpreter {
         }
     }
     
-    pub fn is_truthy_flip(&self, object : Option<Literal>) -> Option<Literal> {
+    fn is_truthy_flip(&self, object : Option<Literal>) -> Option<Literal> {
         match object {
             Some(b) => {
-                if let Literal::Boolean(x) = b {
-                    Some(Literal::Boolean(!x))
-                } 
-                else {
-                    Some(Literal::Boolean(false))
+                match b {
+                    Literal::Boolean(x) => Some(Literal::Boolean(!x)),
+                    Literal::Collection(x) => Some(Literal::Collection(x.into_iter().rev().collect())),
+                    _ => Some(Literal::Boolean(false))
                 }
             }
             None => {
@@ -214,8 +246,6 @@ impl Interpreter {
     }
     
     pub fn execute_block(&mut self, statements : &Vec<Box<dyn Stmt>>, environment : Environment) -> RuntimeError<Option<Literal>> {
-        self.environment = environment;
-        
         let mut return_val = None;
         
         for statement in statements {
@@ -273,10 +303,10 @@ impl StmtVisitor for Interpreter {
     }
     
     fn visit_block_stmt(&mut self, stmt : &Block) -> RuntimeError<Option<Literal>> {
-        let previous = self.environment.clone();
-        self.environment = Environment::new_with_enclosing(previous.clone());
-        let res = self.execute_block(&stmt.statements, self.environment.clone());
-        self.environment = previous;
+        self.environment = Environment::new_with_enclosing(self.environment.clone());
+        let res = self.execute_block(&stmt.statements, Environment::new_with_enclosing(self.environment.clone()));
+        let prev = *self.environment.clone().enclosing.unwrap();
+        self.environment = prev;
         res
     }
     
@@ -302,8 +332,8 @@ impl StmtVisitor for Interpreter {
         let mut methods = HashMap::new();
         for method in &stmt.methods {
             if let Some(v) = method.as_any().downcast_ref::<Function>() {
-                let is_init = v.name.lexeme.clone() == stmt.name.lexeme;
-                let function = LoxFunction::new(v.clone(), self.environment.clone(), is_init);
+                let is_init = v.name.lexeme.clone() == stmt.name.lexeme.clone();
+                let function = LoxFunction::new(v.clone(), self.environment.clone(), FunctionType::Method, is_init);
                 methods.insert(v.name.lexeme.clone(), function);
             }
         }
@@ -336,7 +366,7 @@ impl StmtVisitor for Interpreter {
 
             if let Some(Literal::Boolean(b)) = self.is_truthy(eval) {
                 if b {
-                   if let Some(_) = stmt.body.as_any().downcast_ref::<Block>() {
+                    if let Some(_) = stmt.body.as_any().downcast_ref::<Block>() {
                         let mut statements = Vec::new(); 
                         Self::collect_from_block(&stmt.body, &mut statements);
                         let mut cont_trigger = false;
@@ -360,8 +390,17 @@ impl StmtVisitor for Interpreter {
                             }
                         }
                         
-                        if cont_trigger && stmt.is_for_loop {
-                            self.execute(&statements[statements.len()-1])?;
+                        if cont_trigger {
+                            match stmt.loop_type {
+                                LoopType::For => {
+                                    self.execute(&statements[statements.len()-1])?;
+                                },
+                                LoopType::ForEach => {
+                                    self.execute(&statements[statements.len()-2])?;
+                                    self.execute(&statements[statements.len()-1])?;
+                                },
+                                _ => { }
+                            }
                         }
                     }
                     else {
@@ -385,12 +424,11 @@ impl StmtVisitor for Interpreter {
                 }
             }
         }
-        
         Ok(None)
     }
     
     fn visit_function_stmt(&mut self, stmt : &Function) -> RuntimeError<Option<Literal>> {
-        let function = Some(Literal::Function(Box::new(LoxFunction::new(stmt.clone(), self.environment.clone(), false))));
+        let function = Some(Literal::Function(Box::new(LoxFunction::new(stmt.clone(), self.environment.clone(), FunctionType::Normal, false))));
         self.environment.define(stmt.name.lexeme.clone(), function);
         Ok(None)
     }
@@ -538,6 +576,23 @@ impl ExprVisitor for Interpreter {
             _ => Err((expr.operator.clone(), "Invalid Operands".to_string()))
         }
     }
+
+    fn visit_ternary_expr(&mut self, expr : &Ternary) -> RuntimeError<Option<Literal>> {
+        let condition = self.evaluate(&expr.condition)?;
+        let right = self.evaluate(&expr.right)?;
+        let left = self.evaluate(&expr.left)?;
+        
+        if let Some(Literal::Boolean(b)) = condition {
+            match b {
+                true => Ok(left),
+                false => Ok(right)
+            }
+        }
+        else {
+            Err((expr.operator_a.clone(), "Invalid condition for Ternary".to_string()))
+        }
+    }
+
     fn visit_grouping_expr(&mut self, expr : &Grouping) -> RuntimeError<Option<Literal>> {
         self.evaluate(&expr.expression)
     }
@@ -567,14 +622,14 @@ impl ExprVisitor for Interpreter {
                             Ok(Some(Literal::Number(x.len() as f64)))
                         } 
                         else {
-                            Err((expr.operator.clone(), "Operand must be a Collection.".to_string()))
+                            Err((expr.operator.clone(), "Operand must be a List.".to_string()))
                         }
                     }
                     None => {
-                        Err((expr.operator.clone(), "Operand must be a Collection.".to_string()))
+                        Err((expr.operator.clone(), "Operand must be a List.".to_string()))
                     }
                 }
-            },
+            }
             TokenType::Bang => {
                 Ok(self.is_truthy_flip(right))
             },
@@ -679,6 +734,21 @@ impl ExprVisitor for Interpreter {
     }
     
     fn visit_literal_expr(&mut self, expr : &LiteralExp) -> RuntimeError<Option<Literal>> {
+        if let Some(Literal::Function(f)) = expr.value.clone() {
+            if let Some(lf) = f.as_any().downcast_ref::<LoxFunction>() {
+                if let FunctionType::Anon = lf.f_type {
+                        return Ok(Some(Literal::Function(Box::new(
+                                LoxFunction::new(
+                                    lf.declaration.clone(),
+                                    Environment::new_with_enclosing(self.environment.clone()), 
+                                    FunctionType::Anon,
+                                    false
+                                )
+                        ))));
+                }
+            }
+        }
+        
         Ok(expr.value.clone())
     }
     
@@ -737,6 +807,12 @@ impl ExprVisitor for Interpreter {
                             (Some(Literal::Number(x)), Some(Literal::Number(y))) => {
                                 Some(Literal::Number(x + y))
                             },
+                            (Some(Literal::StrongNumber(x)), Some(Literal::Number(y))) => {
+                                 Some(Literal::StrongNumber(x + y))
+                            }
+                            (Some(Literal::StrongNumber(x)), Some(Literal::StrongNumber(y))) => {
+                                 Some(Literal::StrongNumber(x + y))
+                            }
                             (Some(Literal::String(x)), Some(Literal::String(y))) => {
                                 Some(Literal::String(format!("{}{}", x, y)))
                             },
@@ -750,6 +826,9 @@ impl ExprVisitor for Interpreter {
                                 x.push(Box::new(Some(y)));
                                 Some(Literal::Collection(x))
                             },
+                            (None, Some(Literal::Number(y))) => {
+                                return Err((expr.name.clone(), "Cannot add Number from Nil.".to_string()));
+                            }
                             _ => {
                                 return Err((expr.name.clone(), "Operands must be Numbers Or Strings.".to_string()));
                             }
@@ -760,11 +839,25 @@ impl ExprVisitor for Interpreter {
                             (Some(Literal::Number(x)), Some(Literal::Number(y))) => {
                                 Some(Literal::Number(x - y))
                             },
+                            (Some(Literal::StrongNumber(x)), Some(Literal::Number(y))) => {
+                                 Some(Literal::StrongNumber(x - y))
+                            }
+                            (Some(Literal::StrongNumber(x)), Some(Literal::StrongNumber(y))) => {
+                                 Some(Literal::StrongNumber(x - y))
+                            }
                             (Some(Literal::Collection(mut x)), Some(Literal::Number(y))) => {
                                 let len = x.len() as i32;
                                 x.remove((y as i32).rem_euclid(len) as usize);
-                                Some(Literal::Collection(x))
+                                if x.len() > 0 {
+                                    Some(Literal::Collection(x))
+                                }
+                                else {
+                                    None
+                                }
                             },
+                            (None, Some(Literal::Number(y))) => {
+                                return Err((expr.name.clone(), "Cannot subtract Number from Nil.".to_string()));
+                            }
                             _ => {
                                 return Err((expr.name.clone(), "Operands must be Numbers.".to_string()));
                             }
@@ -775,6 +868,12 @@ impl ExprVisitor for Interpreter {
                             (Some(Literal::Number(x)), Some(Literal::Number(y))) => {
                                 Some(Literal::Number(x / y))
                             },
+                            (Some(Literal::StrongNumber(x)), Some(Literal::Number(y))) => {
+                                 Some(Literal::StrongNumber(x / y))
+                            }
+                            (Some(Literal::StrongNumber(x)), Some(Literal::StrongNumber(y))) => {
+                                 Some(Literal::StrongNumber(x / y))
+                            }
                             _ => {
                                 return Err((expr.name.clone(), "Operands must be Numbers.".to_string()));
                             }
@@ -785,6 +884,12 @@ impl ExprVisitor for Interpreter {
                             (Some(Literal::Number(x)), Some(Literal::Number(y))) => {
                                 Some(Literal::Number(x * y))
                             },
+                            (Some(Literal::StrongNumber(x)), Some(Literal::Number(y))) => {
+                                 Some(Literal::StrongNumber(x * y))
+                            }
+                            (Some(Literal::StrongNumber(x)), Some(Literal::StrongNumber(y))) => {
+                                 Some(Literal::StrongNumber(x * y))
+                            }
                             _ => {
                                 return Err((expr.name.clone(), "Operands must be Numbers.".to_string()));
                             }
@@ -793,8 +898,14 @@ impl ExprVisitor for Interpreter {
                     TokenType::Mod => {
                         match (current, value) {
                             (Some(Literal::Number(x)), Some(Literal::Number(y))) => {
-                                Some(Literal::Number(x % y))
+                                Some(Literal::Number(x.rem_euclid(y)))
                             },
+                            (Some(Literal::StrongNumber(x)), Some(Literal::Number(y))) => {
+                                 Some(Literal::StrongNumber(x.rem_euclid(y)))
+                            }
+                            (Some(Literal::StrongNumber(x)), Some(Literal::StrongNumber(y))) => {
+                                 Some(Literal::StrongNumber(x.rem_euclid(y)))
+                            }
                             _ => {
                                 return Err((expr.name.clone(), "Operands must be Numbers.".to_string()));
                             }
@@ -804,7 +915,41 @@ impl ExprVisitor for Interpreter {
                 }
             }
             None => {
-                value
+                match (current, value.clone()) {
+                    (Some(Literal::StrongNumber(x)), Some(Literal::Number(y))) => {
+                         Some(Literal::StrongNumber(y))
+                    }
+                    (Some(Literal::StrongNumber(x)), Some(Literal::StrongNumber(y))) => {
+                         Some(Literal::StrongNumber(y))
+                    }
+                    (Some(Literal::StrongNumber(x)), Some(y)) => {
+                        return Err((expr.name.clone(), "Invalid assign".to_string()));    
+                    }
+                    
+                    (Some(Literal::StrongBoolean(x)), Some(Literal::Boolean(y))) => {
+                         Some(Literal::StrongBoolean(y))
+                    }
+                    (Some(Literal::StrongBoolean(x)), Some(Literal::StrongBoolean(y))) => {
+                         Some(Literal::StrongBoolean(y))
+                    }
+                    (Some(Literal::StrongBoolean(x)), Some(y)) => {
+                        return Err((expr.name.clone(), "Invalid assign".to_string()));    
+                    }
+                    
+                    (Some(Literal::StrongString(x)), Some(Literal::String(y))) => {
+                         Some(Literal::StrongString(y))
+                    }
+                    (Some(Literal::StrongString(x)), Some(Literal::String(y))) => {
+                         Some(Literal::StrongString(y))
+                    }
+                    (Some(Literal::StrongString(x)), Some(y)) => {
+                        return Err((expr.name.clone(), "Invalid assign".to_string()));    
+                    }
+                    
+                    _ => {
+                        value.clone()
+                    }
+                }
             }
         };
         
@@ -904,7 +1049,33 @@ impl ExprVisitor for Interpreter {
                 }
             },
             Err(_) => {
-                if let Some(v) = expr.callee.as_any().downcast_ref::<Get>() {
+                if let Some(v) = expr.callee.as_any().downcast_ref::<VarExpr>() {
+                    let func = self.evaluate(&expr.callee)?;
+                    if let Some(Literal::Function(f)) = func {
+                        if arguments.len() != f.arity() {
+                            Err((
+                                expr.paren.clone(), 
+                                format!(
+                                    "Expected {} arguments but got {}.", 
+                                    f.arity(), 
+                                    arguments.len()
+                                )
+                            ))
+                        }
+                        else {
+                            Ok(f.call(self, arguments, true)?)
+                        }
+                    }
+                    else {
+                        Err((
+                            expr.paren.clone(), 
+                            format!(
+                                "Expected function from var."
+                            )
+                        ))
+                    }
+                }
+                else if let Some(v) = expr.callee.as_any().downcast_ref::<Get>() {
                     let func = self.evaluate(&expr.callee)?;
                     
                     if let Some(Literal::Function(f)) = func {
@@ -925,14 +1096,76 @@ impl ExprVisitor for Interpreter {
                             if let Some(caller) = v.object.as_any().downcast_ref::<VarExpr>() {
                                 if let Ok(Some(v)) = self.environment
                                 .get(Token::new(TokenType::Identifier, "this", None, 0)) {
-                                    self.environment = previous;
+                                    if let Some(prev) = self.environment.clone().enclosing {
+                                        self.environment = *prev;
+                                    }
                                     self.environment.assign(caller.name.clone(), Some(v.clone()))?;
                                 }
                             }
                             else if let Some(caller) = v.object.as_any().downcast_ref::<IndexGet>() {
                                 if let Ok(Some(v2)) = self.environment
                                 .get(Token::new(TokenType::Identifier, "this", None, 0)) {
-                                    self.environment = previous;
+                                    if let Some(prev) = self.environment.clone().enclosing {
+                                        self.environment = *prev;
+                                    }
+                                    
+                                    if let Some(variable) = caller.object.as_any().downcast_ref::<VarExpr>() {
+                                        if let Some(Literal::Collection(mut coll)) = self.environment.get(variable.name.clone())? {
+                                            if let Some(Literal::Number(index)) = self.evaluate(&caller.index)? {
+                                                let len = coll.len() as i32;
+                                                coll[((index as i32).rem_euclid(len)) as usize] = Box::new(Some(v2.clone()));
+                                                self.environment.assign(variable.name.clone(), Some(Literal::Collection(coll.clone())))?;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            Ok(res)
+                        }
+                    }
+                    else {
+                        Err((
+                            expr.paren.clone(), 
+                            format!(
+                                "Expected function from get."
+                            )
+                        ))
+                    }
+                }
+                else if let Some(v) = expr.callee.as_any().downcast_ref::<IndexGet>() {
+                    let func = self.evaluate(&expr.callee)?;
+                    
+                    if let Some(Literal::Function(f)) = func {
+                        if arguments.len() != f.arity() {
+                            Err((
+                                expr.paren.clone(), 
+                                format!(
+                                    "Expected {} arguments but got {}.", 
+                                    f.arity(), 
+                                    arguments.len()
+                                )
+                            ))
+                        }
+                        else {
+                            let previous = self.environment.clone();
+                            let res = f.call(self, arguments, true)?;
+                            
+                            if let Some(caller) = v.object.as_any().downcast_ref::<VarExpr>() {
+                                if let Ok(Some(v)) = self.environment
+                                .get(Token::new(TokenType::Identifier, "this", None, 0)) {
+                                    if let Some(prev) = self.environment.clone().enclosing {
+                                        self.environment = *prev;
+                                    }
+                                    self.environment.assign(caller.name.clone(), Some(v.clone()))?;
+                                }
+                            }
+                            else if let Some(caller) = v.object.as_any().downcast_ref::<IndexGet>() {
+                                if let Ok(Some(v2)) = self.environment
+                                .get(Token::new(TokenType::Identifier, "this", None, 0)) {
+                                    if let Some(prev) = self.environment.clone().enclosing {
+                                        self.environment = *prev;
+                                    }
                                     
                                     if let Some(variable) = caller.object.as_any().downcast_ref::<VarExpr>() {
                                         if let Some(Literal::Collection(mut coll)) = self.environment.get(variable.name.clone())? {
@@ -977,7 +1210,9 @@ impl ExprVisitor for Interpreter {
                             
                             if let Ok(Some(Literal::Instance(inst_old))) = self.environment
                             .get(Token::new(TokenType::Identifier, "this", None, 0)) {
-                                self.environment = previous;
+                                if let Some(prev) = self.environment.clone().enclosing {
+                                        self.environment = *prev;
+                                    }
                                     
                                 if let Ok(Some(Literal::Instance(inst))) = self.environment
                                 .get(Token::new(TokenType::Identifier, "this", None, 0)) {
@@ -1110,7 +1345,7 @@ impl ExprVisitor for Interpreter {
                                 TokenType::Mod => {
                                     match (current, value.clone()) {
                                         (Some(Literal::Number(x)), Some(Literal::Number(y))) => {
-                                            Some(Literal::Number(x % y))
+                                            Some(Literal::Number(x.rem_euclid(y)))
                                         },
                                         _ => {
                                             return Err((expr.name.clone(), "Operands must be Numbers.".to_string()));
@@ -1155,62 +1390,35 @@ impl ExprVisitor for Interpreter {
     }
     
     fn visit_index_get_expr(&mut self, expr : &IndexGet) -> RuntimeError<Option<Literal>> {
-        if let Some(v) = expr.object.as_any().downcast_ref::<VarExpr>() {
-            if let Some(Literal::Number(index)) = self.evaluate(&expr.index)? {
-                if let Some(Literal::Collection(c)) = self.environment.get(v.name.clone())? {
-                    Ok(*c[((index as i32).rem_euclid(c.len() as i32)) as usize].clone())
-                }
-                else {
-                    Err((expr.keyword.clone(), "Attempt to index with non collection type.".to_string()))
-                }
-            }
-            else {
-                Err((expr.keyword.clone(), "Attempt to index with non number type.".to_string()))
-            }
-        }
-        else if let Some(v) = expr.object.as_any().downcast_ref::<Get>() {
-            if let Some(Literal::Number(index)) = self.evaluate(&expr.index)? {
-                if let Some(v2) = v.object.as_any().downcast_ref::<VarExpr>() {
-                    if let Some(Literal::Instance(t)) = self.environment.get(v2.name.clone())? {
-                        if let Some(Literal::Collection(c)) = t.get(v.name.clone(), self)? {
-                            if c.len() > 0 {
-                                Ok(*c[((index as i32).rem_euclid(c.len() as i32)) as usize].clone())
-                            }
-                            else {
-                                Ok(None)
-                            }
-                        }
-                        else {
-                            Err((expr.keyword.clone(), "Attempt to index with non collection type.".to_string()))
-                        }
-                    }
-                    else {
-                         Err((expr.keyword.clone(), "Attempt to index with non collection type.".to_string()))
-                    }
-                }
-                else if let Some(Literal::Instance(t)) = self.environment.get(Token::new(TokenType::Identifier, "this", None, expr.keyword.line))? {
-                    if let Some(Literal::Collection(c)) = t.get(v.name.clone(), self)? {
-                        if c.len() > 0 {
-                            Ok(*c[((index as i32).rem_euclid(c.len() as i32)) as usize].clone())
-                        }
-                        else {
-                            Ok(None)
-                        }
-                    }
-                    else {
-                        Err((expr.keyword.clone(), "Attempt to index with non collection type.".to_string()))
-                    }
-                }
-                else {
-                    Err((expr.keyword.clone(), "Attempt to index with non collection type.".to_string()))
-                }
-            }
-            else {
-                Err((expr.keyword.clone(), "Attempt to index with non number type.".to_string()))
-            }
-        }
-        else if let Some(v) = expr.object.as_any().downcast_ref::<IndexGet>() {
+        if let Some(v) = expr.object.as_any().downcast_ref::<IndexGet>() {
             if let Some(Literal::Collection(c)) = self.evaluate(&expr.object)? {
+                if let Some(Literal::Number(index)) = self.evaluate(&expr.index)? {
+                    if c.len() > 0 {
+                        Ok(*c[((index as i32).rem_euclid(c.len() as i32)) as usize].clone())
+                    }
+                    else {
+                        Ok(None)
+                    }
+                }
+                else {
+                     Err((expr.keyword.clone(), "Attempt to index with non list type.".to_string()))
+                }
+            }
+            else {
+                self.visit_index_get_expr(&v)
+            }
+        }
+        else {
+            let mut object = self.evaluate(&expr.object)?;
+            if let Some(Literal::String(s)) = object {
+                let mut vec = vec!();
+                for c in s.chars() {
+                    vec.push(Box::new(Some(Literal::String(String::from(c)))));
+                }
+                object = Some(Literal::Collection(vec));
+            }
+            
+            if let Some(Literal::Collection(c)) =  object {
                 if let Some(Literal::Number(index)) = self.evaluate(&expr.index)? {
                     if c.len() > 0 {
                         Ok(*c[((index as i32).rem_euclid(c.len() as i32)) as usize].clone())
@@ -1224,19 +1432,24 @@ impl ExprVisitor for Interpreter {
                 }
             }
             else {
-                self.visit_index_get_expr(&v)
+                Err((expr.keyword.clone(), "Attempt to index non-var.".to_string()))
             }
-        }
-        else {
-            Err((expr.keyword.clone(), "Attempt to index non-var.".to_string()))
         }
     }
     
-    //added
     fn visit_index_set_expr(&mut self, expr : &IndexSet, coll : Vec<Box<Option<Literal>>>) -> RuntimeError<Option<Literal>> {
-        let object = self.evaluate(&expr.object)?;
-        let use_coll = coll.len() != 0;
-        
+        let mut object = self.evaluate(&expr.object)?;
+        let mut string_manip = false;
+        if let Some(Literal::String(s)) = object {
+            let mut vec = vec!();
+            for c in s.chars() {
+                vec.push(Box::new(Some(Literal::String(String::from(c)))));
+            }
+            string_manip = true;
+            object = Some(Literal::Collection(vec));
+        }
+            
+        let mut use_coll = coll.len() != 0;
         if let Some(Literal::Collection(mut v)) = object {
             let value = self.evaluate(&expr.value)?;
 
@@ -1347,9 +1560,49 @@ impl ExprVisitor for Interpreter {
                 else {
                     return Err((expr.name.clone(), "Attempt to index with non number type.".to_string()));
                 }
+                if !string_manip {
+                    self.environment.assign(as_var.name.clone(), Some(Literal::Collection(v.clone())))?;
                 
-                self.environment.assign(as_var.name.clone(), Some(Literal::Collection(v.clone())))?;
-            
+                    Ok(new_value)
+                }
+                else {
+                    let mut new_str = String::from("");
+                    for c in v {
+                        if let Some(Literal::String(s)) = *c {
+                            new_str += s.as_str();
+                        }
+                    }
+                
+                    self.environment.assign(as_var.name.clone(), Some(Literal::String(new_str)))?;
+                
+                    Ok(new_value)
+                }
+            }
+            else if let Some(as_get) = expr.object.as_any().downcast_ref::<Get>() {
+                
+                if let Some(Literal::Number(index)) = self.evaluate(&expr.index)? {
+                    if use_coll {
+                        v[index as usize] = Box::new(Some(Literal::Collection(coll.clone())));
+                    }
+                    else {
+                        v[index as usize] = Box::new(new_value.clone());
+                    }
+                }
+                else {
+                    return Err((expr.name.clone(), "Attempt to index with non number type.".to_string()));
+                }
+                
+                if let Some(Literal::Instance(mut inst)) = self.evaluate(&as_get.object)? {
+                    inst.set(as_get.name.clone(), Some(Literal::Collection(v.clone())));
+
+                    if let Some(as_this) = as_get.object.as_any().downcast_ref::<This>() {
+                        self.environment.assign(as_this.keyword.clone(), Some(Literal::Instance(inst.clone())))?;
+                    }
+                    else if let Some(as_var) = as_get.object.as_any().downcast_ref::<VarExpr>() {
+                        self.environment.assign(as_var.name.clone(), Some(Literal::Instance(inst.clone())))?;
+                    }
+                }
+                
                 Ok(new_value)
             }
             else if let Some(as_index_get) = expr.object.as_any().downcast_ref::<IndexGet>() {
@@ -1379,12 +1632,11 @@ impl ExprVisitor for Interpreter {
                 }
             }
             else {
-                Err((expr.name.clone(), "Only collections can be indexed.".to_string()))
+                Err((expr.name.clone(), "Only list types can be indexed.".to_string()))
             }
         }
         else {
-            println!("{:#?}",object);
-            Err((expr.name.clone(), "Only collections can be indexed.".to_string()))
+            Err((expr.name.clone(), "Only list types can be indexed.".to_string()))
         }
     }
 }

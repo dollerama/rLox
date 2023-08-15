@@ -31,6 +31,9 @@ impl Scanner {
         keywords_container.insert(String::from("this"), TokenType::This);
         keywords_container.insert(String::from("true"), TokenType::True);
         keywords_container.insert(String::from("var"), TokenType::Var);
+        keywords_container.insert(String::from("bool"), TokenType::Bool);
+        keywords_container.insert(String::from("num"), TokenType::Number);
+        keywords_container.insert(String::from("string"), TokenType::String);
         keywords_container.insert(String::from("while"), TokenType::While);
         keywords_container.insert(String::from("break"), TokenType::Break);
         keywords_container.insert(String::from("continue"), TokenType::Continue);
@@ -67,6 +70,8 @@ impl Scanner {
             ',' => self.add_token(TokenType::Comma),
             '.' => self.add_token(TokenType::Dot),
             '#' => self.add_token(TokenType::Hash),
+            '?' => self.add_token(TokenType::Question),
+            '|' => self.add_token(TokenType::Pipe),
             '-' => {
                 if self.try_pair('-') {
                     self.add_token(TokenType::Decr)
@@ -110,9 +115,14 @@ impl Scanner {
                 }
             },
             '=' => {
-                match self.try_pair('=') {
-                    true => self.add_token(TokenType::EqualEqual),
-                    false => self.add_token(TokenType::Equal)
+                if self.try_pair('=') {
+                    self.add_token(TokenType::EqualEqual)
+                }
+                else if self.try_pair('>') {
+                    self.add_token(TokenType::Lambda)
+                }
+                else {
+                    self.add_token(TokenType::Equal)
                 }
             },
             '<' => {

@@ -237,6 +237,28 @@ impl IndexSet {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Ternary {
+    pub condition : Box<dyn Expr>,
+    pub operator_a : Token,
+    pub left : Box<dyn Expr>,
+    pub operator_b : Token,
+    pub right : Box<dyn Expr>
+}
+
+impl Ternary {
+    pub fn new(condition : Box<dyn Expr>, operator_a : Token, left : Box<dyn Expr>,
+    operator_b : Token, right : Box<dyn Expr>) -> Self {
+        Self {
+            condition,
+            operator_a,
+            left,
+            operator_b,
+            right
+        }
+    }
+}
+
 impl Expr for VarExpr {
     fn accept(&self, visitor : &mut Box<&mut dyn ExprVisitor>) -> RuntimeError<Option<Literal>> {
         visitor.visit_var_expr(self)
@@ -436,6 +458,20 @@ impl Expr for IndexGet {
 impl Expr for IndexSet {
     fn accept(&self, visitor : &mut Box<&mut dyn ExprVisitor>) -> RuntimeError<Option<Literal>> {
         visitor.visit_index_set_expr(self, vec!())
+    }
+    
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    
+    fn clone_dyn(&self) -> Box<dyn Expr> {
+        Box::new(self.clone()) 
+    }
+}
+
+impl Expr for Ternary {
+    fn accept(&self, visitor : &mut Box<&mut dyn ExprVisitor>) -> RuntimeError<Option<Literal>> {
+        visitor.visit_ternary_expr(self)
     }
     
     fn as_any(&self) -> &dyn Any {

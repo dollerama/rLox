@@ -31,11 +31,12 @@ impl Environment {
             Ok(self.values.get(&name.lexeme).unwrap().clone())
         }
         else {
-            match self.enclosing.clone() {
+            match self.enclosing.as_ref() {
                 Some(v) => {
                     v.get(name.clone())
                 },
                 None => {
+                    
                     Err((name.clone(), format!("Could not Find Var")))
                 }
             }
@@ -48,16 +49,14 @@ impl Environment {
             Ok(None)
         }
         else {
-            match self.enclosing.clone() {
-                Some(mut v) => {
-                    v.assign(name, value)
-                },
-                None => {
-                    Err((
-                        name.clone(), 
-                        format!("Undefined Variable '{}'.", name.lexeme.clone())
-                    ))
-                }
+            if let Some(_) = self.enclosing {
+                self.enclosing.as_mut().unwrap().assign(name, value)
+            }
+            else {
+                Err((
+                    name.clone(), 
+                    format!("Undefined Variable '{}'.", name.lexeme.clone())
+                ))
             }
         }
     }
