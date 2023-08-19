@@ -1,4 +1,4 @@
-use r_lox::application::App;
+use rlox::application::App;
 
 fn main() {
     let mut lox = App::new();
