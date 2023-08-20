@@ -278,11 +278,16 @@ impl Interpreter {
                     }
                     true => {
                         let mut o = format!("{} {{\n", i.class.name.clone());
+                        let mut count = 0;
                         for field in &i.fields {
                             o.push_str(&format!("  {} = ", field.0));
                             o.push_str(&Self::print_helper(field.1.clone(), true));
+                            if count != i.fields.len()-1 {
+                                o.push_str("\n");
+                            }
+                            count += 1;
                         }
-                        o.push_str(&format!("\n}}\n"));
+                        o.push_str(&format!("}}\n"));
                         o
                     }
                 }
