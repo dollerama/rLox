@@ -34,6 +34,8 @@ mod tests {
         else {
             b = 1;
         }
+
+        string d = 4%2==0 ? \"4 is even\" : \"4 is not even\";
         ");
         let a = match lox.get_value::<bool>("a") {
             Ok(v) => v,
@@ -45,8 +47,14 @@ mod tests {
             Err(_) => 0.0
         };    
 
+        let d = match lox.get_value::<String>("d") {
+            Ok(v) => v,
+            Err(_) => "".to_string()
+        };    
+
         assert_eq!(a, true);
         assert_eq!(b, 1.0);
+        assert_eq!(d, "4 is even");
     }
 
     #[test]
@@ -55,10 +63,18 @@ mod tests {
         lox.run("
         num a = 0;
         for i < 5 {
+            print(a);
+            if i%2 == 0 a++;
+            else continue;
+
             a++;
         }
 
         for var i = 0; i < 5; i++ {
+            print(a);
+            if i%2 != 0 a++;
+            else continue;
+            
             a++;
         }
 
@@ -66,12 +82,24 @@ mod tests {
         for i in [1,2,3,4,5] {
             b += i as string;
         }
-
-        var list = [1,2,3];
-
-        for i in list {
-            list[i_iter] += 5;
+        
+        string c = \"\";
+        for i in ![1,2,3,4,5] {
+            c += i as string;
         }
+
+        var d = [1,2,3];
+
+        for i in d {
+            d[i_iter] += 5;
+        }
+
+        var e = false;
+        var i = 0;
+        while i < 5 {
+            i++;
+        }
+        e = true;
         ");
         let a = match lox.get_value::<f64>("a") {
             Ok(v) => v,
@@ -81,13 +109,23 @@ mod tests {
             Ok(v) => v,
             Err(_) => "".to_string()
         };
-        let c = match lox.get_vec::<f64>("list") {
+        let c = match lox.get_value::<String>("c") {
+            Ok(v) => v,
+            Err(_) => "".to_string()
+        };
+        let d = match lox.get_vec::<f64>("d") {
             Ok(v) => v,
             Err(_) => Vec::new()
         };
+        let e = match lox.get_value::<bool>("e") {
+            Ok(v) => v,
+            Err(_) => false
+        };
 
-        assert_eq!(a, 20.0);
+        assert_eq!(a, 12.0);
         assert_eq!(b, "12345".to_string());
-        assert_eq!(c.iter().sum::<f64>(), 21.0);
+        assert_eq!(c, "54321".to_string());
+        assert_eq!(d.iter().sum::<f64>(), 21.0);
+        assert_eq!(e, true);
     }
 }

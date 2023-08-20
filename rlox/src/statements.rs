@@ -6,12 +6,14 @@ use crate::types::*;
 #[derive(Clone, Debug)]
 pub struct Print {
     pub expression : Box<dyn Expr>,
+    pub newline : bool
 }
 
 impl Print {
-    pub fn new(expression : Box<dyn Expr>) -> Self {
+    pub fn new(expression : Box<dyn Expr>, newline : bool) -> Self {
         Self {
-            expression
+            expression,
+            newline
         }
     }
 }

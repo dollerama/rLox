@@ -1,4 +1,7 @@
 use std::{fs, env};
+use std::io;
+use std::io::Write;
+
 use crate::std_lib::*;
 use crate::types::*;
 use crate::tokens::*;
@@ -24,11 +27,57 @@ impl App {
         let args: Vec<String> = env::args().collect();
 
         if args.len() > 1 {
-            self.run_from_file(args[1].clone());
+            if args[1].clone() == "repl" {
+                if let Err(e) = self.run_repl() {
+                    Self::error(e.0, &e.1);
+                }
+            }
+            else {
+                self.run_from_file(args[1].clone());
+            }
+
+            if args.len() > 2 {
+                if args[2].clone() == "-stdout" {
+                    println!("\n---[Output]---");
+                    print!("{}\n", self.interpreter.stdout);
+                }
+            }
         }
         else {
             panic!("Provide a lox file to interpret.");
         }
+    }
+
+    pub fn run_repl(&mut self) -> RuntimeError<()> {
+        self.add_std_lib()?;
+        let stdin = io::stdin(); // We get `Stdin` here.
+        
+        loop {
+            let mut user_input = String::new();
+            io::stdout().flush().unwrap();
+            if let Err(e) = stdin.read_line(&mut user_input) {
+                println!("{}", e);
+            }
+
+            if user_input == "exit\n" {
+                break;
+            }
+
+            let mut scanner = Scanner::new(String::from(user_input));
+            let tokens = scanner.scan_tokens()?;
+
+            let mut parser = Parser::new(tokens.to_vec());
+            let statements = parser.parse()?;
+            
+            self.interpreter.interpret(statements)?;
+            if self.interpreter.stdout != "" {
+                println!("");
+            }
+            self.interpreter.stdout = "".to_string();
+        }
+
+        self.final_environment = Some(self.interpreter.environment.clone());
+        Ok(())
     }
 
     pub fn error(token : Token, message : &str) {
@@ -48,31 +97,30 @@ impl App {
         println!("[line {} ] error {}: {}", line, where_str, message);
     }
 
-    fn add_std_lib(&mut self) {
+    fn add_std_lib(&mut self) -> RuntimeError<()> {
         self.interpreter.insert_function(function_container!(DebugFunction));
         self.interpreter.insert_function(function_container!(LenFunction));
         self.interpreter.insert_function(function_container!(ClockFunction));
         self.interpreter.insert_function(function_container!(RandomFunction));
-
         self.interpreter.insert_value("PI", 3.14159265359.into());
+
+        let mut scanner = Scanner::new(String::from(STD_LIB_SCRIPT));
+        let tokens = scanner.scan_tokens()?;
+        let mut parser = Parser::new(tokens.to_vec());
+        let statements = parser.parse()?;
+        self.interpreter.interpret(statements)?;
+
+        Ok(())
     }
 
     pub fn try_run(&mut self, source : &str) -> RuntimeError<()> {
-        self.add_std_lib();
-        let mut scanner = Scanner::new(String::from(STD_LIB_SCRIPT));
+        self.add_std_lib()?;
 
-        let mut tokens = scanner.scan_tokens()?;
+        let mut scanner = Scanner::new(String::from(source));
+        let tokens = scanner.scan_tokens()?;
+
         let mut parser = Parser::new(tokens.to_vec());
-
-        let mut statements = parser.parse()?;
-
-        self.interpreter.interpret(statements)?;
-        
-        scanner = Scanner::new(String::from(source));
-        tokens = scanner.scan_tokens()?;
-
-        parser = Parser::new(tokens.to_vec());
-        statements = parser.parse()?;
+        let statements = parser.parse()?;
         
         self.interpreter.interpret(statements)?;
 

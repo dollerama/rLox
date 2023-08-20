@@ -26,6 +26,7 @@ impl Scanner {
         keywords_container.insert(String::from("nil"), TokenType::Nil);
         keywords_container.insert(String::from("||"), TokenType::Or);
         keywords_container.insert(String::from("print"), TokenType::Print);
+        keywords_container.insert(String::from("println"), TokenType::PrintLn);
         keywords_container.insert(String::from("return"), TokenType::Return);
         keywords_container.insert(String::from("super"), TokenType::Super);
         keywords_container.insert(String::from("this"), TokenType::This);

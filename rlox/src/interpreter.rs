@@ -9,6 +9,7 @@ use crate::expressions::*;
 
 pub struct Interpreter {
    pub environment : Environment,
+   pub stdout : String,
    pub time : Instant
 }
 
@@ -16,7 +17,8 @@ impl Interpreter {
     pub fn new() -> Self {
         Self {
             environment : Environment::new(),
-            time : Instant::now()
+            time : Instant::now(),
+            stdout : "".to_string()
         }
     }
 
@@ -87,6 +89,10 @@ impl Interpreter {
                                     },
                                     (Some(Literal::Collection(mut x)), Some(y)) => {
                                         x.push(Box::new(Some(y)));
+                                        Ok(Some(Literal::Collection(x)))
+                                    },
+                                    (Some(Literal::Collection(mut x)), None) => {
+                                        x.push(Box::new(None));
                                         Ok(Some(Literal::Collection(x)))
                                     },
                                     _ => {
@@ -209,114 +215,121 @@ impl Interpreter {
         }
     }
     
-    pub fn print_helper(value : Option<Literal>, new_line : bool) {
-        match value {
+    pub fn print_helper(value : Option<Literal>, new_line : bool) -> String {
+        let out = match value {
             Some(Literal::String(s)) => {
                 match new_line {
-                    false => print!("{}", s),
-                    true => println!("{}", s)
+                    false => format!("{}", s),
+                    true => format!("{}\n", s)
                 }
             },
             Some(Literal::Boolean(b)) => {
                 match new_line {
-                    false => print!("{}", b),
-                    true => println!("{}", b)
+                    false => format!("{}", b),
+                    true => format!("{}\n", b)
                 }
             },
             Some(Literal::Number(n)) => {
                 match new_line {
-                    false => print!("{}", n),
-                    true => println!("{}", n)
+                    false => format!("{}", n),
+                    true => format!("{}\n", n)
                 }
             },
             Some(Literal::StrongString(s)) => {
                 match new_line {
-                    false => print!("{}", s),
-                    true => println!("{}", s)
+                    false => format!("{}", s),
+                    true => format!("{}\n", s)
                 }
             },
             Some(Literal::StrongBoolean(b)) => {
                 match new_line {
-                    false => print!("{}", b),
-                    true => println!("{}", b)
+                    false => format!("{}", b),
+                    true => format!("{}\n", b)
                 }
             },
             Some(Literal::StrongNumber(n)) => {
                 match new_line {
-                    false => print!("{}", n),
-                    true => println!("{}", n)
+                    false => format!("{}", n),
+                    true => format!("{}\n", n)
                 }
             },
             Some(Literal::Function(f)) => {
                 match new_line {
-                    false => print!("fn => {:#?}", f),
-                    true => println!("fn => {:#?}", f)
+                    false => format!("fn => {:#?}", f),
+                    true => format!("fn => {:#?}\n", f)
                 }
             },
             Some(Literal::Instance(i)) => {
                 match new_line {
                     false => {
-                        print!("instance of {} {{", i.class.name.clone());
+                        let mut o = format!("instance of {} {{", i.class.name.clone());
+                        
                         let mut count = 0;
                         for field in &i.fields {
-                            print!("{} = ", field.0);
-                            Self::print_helper(field.1.clone(), false);
+                            o.push_str(&format!("{} = ", field.0));
+                            o.push_str(&Self::print_helper(field.1.clone(), false));
                             if count != i.fields.len()-1 {
-                                print!(", ");
+                                o.push_str(&format!(", "));
                             }
                             count += 1;
                         }
-                        print!("}}");
+                        o.push_str(&format!("}}"));
+                        o
                     }
                     true => {
-                        println!("{} {{", i.class.name.clone());
+                        let mut o = format!("{} {{\n", i.class.name.clone());
                         for field in &i.fields {
-                            print!("  {} = ", field.0);
-                            Self::print_helper(field.1.clone(), true);
+                            o.push_str(&format!("  {} = ", field.0));
+                            o.push_str(&Self::print_helper(field.1.clone(), true));
                         }
-                        println!("\n}}");
+                        o.push_str(&format!("\n}}\n"));
+                        o
                     }
                 }
             },
             Some(Literal::Collection(n)) => {
                 match new_line {
                     false => {
-                        print!("[");
+                        let mut o = format!("[");
                         for i in 0..n.len() {
-                            Self::print_helper(*n[i].clone(), false);
+                            o.push_str(&Self::print_helper(*n[i].clone(), false));
                             
                             if i != n.len()-1 {
-                                print!(", ");
+                                o.push_str(&format!(", "));
                             }
                         }
-                        print!("]");
+                        o.push_str(&format!("]"));
+                        o
                     },
                     true => {
-                        print!("[");
+                        let mut o = format!("[");
                         for i in 0..n.len() {
-                            Self::print_helper(*n[i].clone(), false);
+                            o.push_str(&Self::print_helper(*n[i].clone(), false));
                             
                             if i != n.len()-1 {
-                                print!(", ");
+                                o.push_str(&format!(", "));
                             }
                         }
-                        print!("]\n");
+                        o.push_str(&format!("]\n"));
+                        o
                     }
                 }
             },
             Some(n) => { 
                 match new_line {
-                    false => print!("{:#?}", n),
-                    true => println!("{:#?}", n)
+                    false => format!("{:#?}", n),
+                    true => format!("{:#?}\n", n)
                 }
             },
             None => {
                 match new_line {
-                    false => print!("nil"),
-                    true => println!("nil")
+                    false => format!("nil"),
+                    true => format!("nil\n")
                 }
             },
-        }    
+        };  
+
+        out
     }
 
     pub fn interpret(&mut self, statements : Vec<Box<dyn Stmt>>) -> RuntimeError<Option<Literal>> {
@@ -537,7 +550,9 @@ impl StmtVisitor for Interpreter {
     fn visit_print_stmt(&mut self, stmt :&Print) -> RuntimeError<Option<Literal>> {
         let value = self.evaluate(&stmt.expression)?;
         
-        Self::print_helper(value, true);
+        let out = Self::print_helper(value, stmt.newline);
+        print!("{}", out);
+        self.stdout.push_str(&out);
         
         Ok(None)
     }

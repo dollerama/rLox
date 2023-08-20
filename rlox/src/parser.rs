@@ -200,6 +200,7 @@ impl Parser {
                 TokenType::If => {},
                 TokenType::While => {},
                 TokenType::Print => {},
+                TokenType::PrintLn => {},
                 TokenType::Break => {},
                 TokenType::Return => break,
                 _ => break
@@ -714,7 +715,10 @@ impl Parser {
             self.if_statement()
         }
         else if self.try_match(vec!(TokenType::Print)) {
-            self.print_statement()
+            self.print_statement(false)
+        }
+        else if self.try_match(vec!(TokenType::PrintLn)) {
+            self.print_statement(true)
         }
         else if self.try_match(vec!(TokenType::Return)) {
             self.return_statement()
@@ -1018,12 +1022,12 @@ impl Parser {
         Ok(Box::new(While::new(condition, body, LoopType::While)))
     }
     
-    fn print_statement(&mut self) -> RuntimeError<Box<dyn Stmt>> {
+    fn print_statement(&mut self, newline : bool) -> RuntimeError<Box<dyn Stmt>> {
         self.consume(TokenType::LeftParen, "Expect '(' after 'print'.")?;
         let value = self.expression()?;
         self.consume(TokenType::RightParen, "Expect ')' after 'print'.")?;
         self.consume(TokenType::Semicolon, "Expect ';' after value.")?;
-        Ok(Box::new(Print::new(value)))
+        Ok(Box::new(Print::new(value, newline)))
     }
     
     fn return_statement(&mut self) -> RuntimeError<Box<dyn Stmt>> {
