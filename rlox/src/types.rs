@@ -290,9 +290,10 @@ impl LoxFunction {
         }
     }
     
-    pub fn bind(&mut self, _interpreter : &mut Interpreter, instance : &LoxInstance) -> LoxFunction {
+    pub fn bind(&mut self, interpreter : &mut Interpreter, instance : &LoxInstance) -> LoxFunction {
         let mut environment = Environment::new_with_enclosing(self.closure.clone());
         environment.define(
+            interpreter,
             "this".to_string(), 
             Some(Literal::Instance(Box::new(instance.clone())))
         );
@@ -314,7 +315,7 @@ impl LoxCallable for LoxFunction {
         let mut environment = self.closure.clone();
         environment.enclosing = Some(Box::new(interpreter.environment.clone()));
 
-        interpreter.environment = Environment::new_with_enclosing(environment.clone());
+        interpreter.environment = environment.clone();
         
         for i in 0..self.declaration.params.len() {
             if let Some(binding) = self.declaration.params[i].binding.clone() {
@@ -338,17 +339,19 @@ impl LoxCallable for LoxFunction {
                 }
             }
             
-            interpreter.environment.define(
+            let mut e = interpreter.environment.clone();
+            e.define(interpreter,
                 self.declaration.params[i].name.lexeme.clone(), 
                 arguments[i].clone()
             );
+            interpreter.environment = e;
         }
         
         let res = interpreter.execute_block(&self.declaration.body)?;
         
         if self.is_init {
             match interpreter.environment
-            .get(Token::new(TokenType::Identifier, "this", None, self.declaration.name.line)) {
+            .get(interpreter, Token::new(TokenType::Identifier, "this", None, self.declaration.name.line)) {
                 Ok(Some(v)) => {
                     if auto_clean {
                         if let Some(prev) = interpreter.environment.clone().enclosing {
@@ -370,6 +373,7 @@ impl LoxCallable for LoxFunction {
                 if let Some(prev) = interpreter.environment.clone().enclosing {
                     interpreter.environment = *prev;
                 }
+                interpreter.collect_garbage();
             }
             
             Ok(res)
@@ -460,20 +464,61 @@ impl LoxCallable for LoxClass {
 #[derive(Clone, Debug)]
 pub struct LoxInstance {
     pub class : Box<LoxClass>,
-    pub fields : HashMap<String, Option<Literal>>
+    pub fields : HashMap<String, Option<Literal>>,
+    pub address : Option<usize>
 }
 
 impl LoxInstance {
     pub fn new(class : Box<LoxClass>) -> Self {
         Self {
             class,
-            fields : HashMap::new()
+            fields : HashMap::new(),
+            address : None
         }
     }
-    
+
+    pub fn get_internal(&self, name : Token, interpreter : &Interpreter) -> RuntimeError<Option<Literal>> {
+        if self.fields.contains_key(&name.lexeme) {
+            if let Some(Literal::Instance(inst)) = self.fields[&name.lexeme].clone() {
+                if let Some(address) = inst.address {
+                    if let Some(a) = interpreter.references.get(address) {
+                        Ok(a.clone())
+                    }
+                    else {
+                        Err((name.clone(), format!("Undefined property '{}'.", name.lexeme.clone())))
+                    }
+                }
+                else {
+                    Err((name.clone(), format!("Undefined property '{}'.", name.lexeme.clone())))
+                }
+            }
+            else {
+                Ok(self.fields[&name.lexeme].clone())
+            }
+        }
+        else {
+            Err((name.clone(), format!("Undefined property '{}'.", name.lexeme.clone())))
+        }
+    }
+
     pub fn get(&self, name : Token, interpreter : &mut Interpreter) -> RuntimeError<Option<Literal>> {
         if self.fields.contains_key(&name.lexeme) {
-            Ok(self.fields[&name.lexeme].clone())
+            if let Some(Literal::Instance(inst)) = self.fields[&name.lexeme].clone() {
+                if let Some(address) = inst.address {
+                    if let Some(a) = interpreter.references.get(address) {
+                        Ok(a.clone())
+                    }
+                    else {
+                        Err((name.clone(), format!("Undefined property '{}'.", name.lexeme.clone())))
+                    }
+                }
+                else {
+                    Err((name.clone(), format!("Undefined property '{}'.", name.lexeme.clone())))
+                }
+            }
+            else {
+                Ok(self.fields[&name.lexeme].clone())
+            }
         }
         else {
             if let Some(mut v) = self.class.find_method(name.lexeme.clone()) {
@@ -484,8 +529,14 @@ impl LoxInstance {
             }
         }
     }
-    
-    pub fn set(&mut self, name : Token, value : Option<Literal>) {
+
+    pub fn set(&mut self, name : Token, value : Option<Literal>, interpreter : &mut Interpreter) {
+        if let Some(Literal::Instance(inst)) = value.clone() {
+            if let Some(address) = inst.address {
+                interpreter.references[address] = value.clone();
+            }
+        }
+        
         self.fields.insert(name.lexeme.clone(), value.clone());
     }
 }

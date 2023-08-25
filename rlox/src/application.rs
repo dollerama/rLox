@@ -144,7 +144,7 @@ impl App {
     pub fn get_value_raw(&self, name : &str) -> Option<Literal> {
         match &self.final_environment {
             Some(v) => {
-                match v.get(Token::new(TokenType::Identifier, name, None, 0)) {
+                match v.get(&self.interpreter, Token::new(TokenType::Identifier, name, None, 0)) {
                     Ok(v) => {
                         v
                     }

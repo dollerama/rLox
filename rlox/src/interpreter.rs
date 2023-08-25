@@ -10,7 +10,8 @@ use crate::expressions::*;
 pub struct Interpreter {
    pub environment : Environment,
    pub stdout : String,
-   pub time : Instant
+   pub time : Instant,
+   pub references : Vec<Option<Literal>>
 }
 
 impl Interpreter {
@@ -18,18 +19,45 @@ impl Interpreter {
         Self {
             environment : Environment::new(),
             time : Instant::now(),
-            stdout : "".to_string()
+            stdout : "".to_string(),
+            references : Vec::new(),
         }
     }
 
+    pub fn collect_garbage(&mut self) {
+        let mut found : Vec<usize> = Vec::new();
+
+        for v in &self.environment.values {
+            if let Some(Literal::Instance(i)) = v.1 {
+                if let Some(a) = i.address {
+                    if self.references.get(a).is_some() {
+                        found.push(a);
+                    }
+                }
+            }
+        }
+        
+        let mut new_refs = Vec::new();
+        for i in 0..self.references.len() {
+            if found.get(i).is_some() {
+                new_refs.push(self.references[i].clone());
+            }
+        }
+        self.references = new_refs;
+    }
+
     pub fn insert_value(&mut self, name : &str, value : Literal) {
-        self.environment.define(name.to_string(), Some(value));
+        let mut e = self.environment.clone();
+        e.define(self, name.to_string(), Some(value));
+        self.environment = e;
     }
 
     pub fn insert_function(&mut self, value : Box<dyn LoxCallable>) {
         let name = value.get_name();
         let function = Some(Literal::Function(value));
-        self.environment.define(name.lexeme.clone(), function);
+        let mut e = self.environment.clone();
+        e.define(self, name.lexeme.clone(), function);
+        self.environment = e;
     }
 
     pub fn collect_from_block(block : &Box<dyn Stmt>, collection : &mut Vec<Box<dyn Stmt>>) {
@@ -215,7 +243,7 @@ impl Interpreter {
         }
     }
     
-    pub fn print_helper(value : Option<Literal>, new_line : bool) -> String {
+    pub fn print_helper(&self, value : Option<Literal>, new_line : bool, tabs : i32) -> String {
         let out = match value {
             Some(Literal::String(s)) => {
                 match new_line {
@@ -260,44 +288,34 @@ impl Interpreter {
                 }
             },
             Some(Literal::Instance(i)) => {
-                match new_line {
-                    false => {
-                        let mut o = format!("instance of {} {{", i.class.name.clone());
-                        
-                        let mut count = 0;
-                        for field in &i.fields {
-                            o.push_str(&format!("{} = ", field.0));
-                            o.push_str(&Self::print_helper(field.1.clone(), false));
-                            if count != i.fields.len()-1 {
-                                o.push_str(&format!(", "));
-                            }
-                            count += 1;
-                        }
-                        o.push_str(&format!("}}"));
-                        o
+                let mut o = format!("{} {{\n", i.class.name.clone());
+                for field in &i.fields {
+                    for _ in 0..tabs+1 {
+                        o.push_str("  ");
                     }
-                    true => {
-                        let mut o = format!("{} {{\n", i.class.name.clone());
-                        let mut count = 0;
-                        for field in &i.fields {
-                            o.push_str(&format!("  {} = ", field.0));
-                            o.push_str(&Self::print_helper(field.1.clone(), true));
-                            if count != i.fields.len()-1 {
-                                o.push_str("\n");
-                            }
-                            count += 1;
-                        }
-                        o.push_str(&format!("}}\n"));
-                        o
+                    o.push_str(&format!("{} = ", field.0));
+                    
+                    let property = i.get_internal(Token::new(TokenType::Nil, field.0, None, 0), self);
+                    if let Ok(v) = property {
+                        o.push_str(&self.print_helper(v, true, tabs+1));
                     }
                 }
+
+                for _ in 0..tabs {
+                    o.push_str("  ");
+                }
+                
+                o.push_str(&format!("}}"));
+                o.push_str(&format!("\n"));
+
+                o
             },
             Some(Literal::Collection(n)) => {
                 match new_line {
                     false => {
                         let mut o = format!("[");
                         for i in 0..n.len() {
-                            o.push_str(&Self::print_helper(*n[i].clone(), false));
+                            o.push_str(&self.print_helper(*n[i].clone(), false, tabs+1));
                             
                             if i != n.len()-1 {
                                 o.push_str(&format!(", "));
@@ -309,7 +327,7 @@ impl Interpreter {
                     true => {
                         let mut o = format!("[");
                         for i in 0..n.len() {
-                            o.push_str(&Self::print_helper(*n[i].clone(), false));
+                            o.push_str(&self.print_helper(*n[i].clone(), false, tabs+1));
                             
                             if i != n.len()-1 {
                                 o.push_str(&format!(", "));
@@ -542,11 +560,14 @@ impl StmtVisitor for Interpreter {
                 (Some(_), TokenType::Var) => { },
                 _ => return Err((stmt.name.clone(), "Invalid variable declaration.".to_string()))
             }
-    
-            self.environment.define(stmt.name.lexeme.clone(), value);
+            let mut e = self.environment.clone();
+            e.define(self, stmt.name.lexeme.clone(), value);
+            self.environment = e;
         }
         else {
-            self.environment.define(stmt.name.lexeme.clone(), None);
+            let mut e = self.environment.clone();
+            e.define(self, stmt.name.lexeme.clone(), None);
+            self.environment = e;
         }
         
         Ok(None)
@@ -555,7 +576,7 @@ impl StmtVisitor for Interpreter {
     fn visit_print_stmt(&mut self, stmt :&Print) -> RuntimeError<Option<Literal>> {
         let value = self.evaluate(&stmt.expression)?;
         
-        let out = Self::print_helper(value, stmt.newline);
+        let out = self.print_helper(value, stmt.newline, 0);
         print!("{}", out);
         self.stdout.push_str(&out);
         
@@ -567,6 +588,7 @@ impl StmtVisitor for Interpreter {
         let res = self.execute_block(&stmt.statements);
         let prev = *self.environment.clone().enclosing.unwrap();
         self.environment = prev;
+        self.collect_garbage();
         res
     }
     
@@ -580,14 +602,16 @@ impl StmtVisitor for Interpreter {
                 Some(Literal::Class(v)) => { 
                     if let Some(v2) = v.as_any().downcast_ref::<LoxClass>() {
                         super_class = Some(Box::new(v2.clone()));
-                        self.environment.define(format!("{}-super", stmt.name.lexeme.clone()), Some(Literal::Class(Box::new(v2.clone()))));
+                        // let mut e = self.environment.clone();
+                        // e.define(self, format!("{}-super", stmt.name.lexeme.clone()), Some(Literal::Class(Box::new(v2.clone()))));
+                        // self.environment = e;
                     }
                 },
                 _ => return Err((stmt.name.clone(), "Super-class must be a class.".to_string()))
             }
         }
-        
-        self.environment.define(stmt.name.lexeme.clone(), None);
+        let mut e = self.environment.clone();
+        e.define(self, stmt.name.lexeme.clone(), None);
         
         let mut methods = HashMap::new();
         for method in &stmt.methods {
@@ -600,7 +624,8 @@ impl StmtVisitor for Interpreter {
         
         let class = Box::new(LoxClass::new(stmt.name.lexeme.clone(), methods, super_class));
         
-        self.environment.assign(stmt.name.clone(), Some(Literal::Class(class)))?;
+        e.assign(self, stmt.name.clone(), Some(Literal::Class(class)))?;
+        self.environment = e;
         Ok(None)
     }
     
@@ -689,7 +714,9 @@ impl StmtVisitor for Interpreter {
     
     fn visit_function_stmt(&mut self, stmt : &Function) -> RuntimeError<Option<Literal>> {
         let function = Some(Literal::Function(Box::new(LoxFunction::new(stmt.clone(), self.environment.clone(), FunctionType::Normal, false))));
-        self.environment.define(stmt.name.lexeme.clone(), function);
+        let mut e = self.environment.clone();
+        e.define(self, stmt.name.lexeme.clone(), function);
+        self.environment = e;
         Ok(None)
     }
     
@@ -1074,17 +1101,23 @@ impl ExprVisitor for Interpreter {
                             let value = Some(Literal::Number(x+1.0));
                             
                             if let Some(i) = expr.right.as_any().downcast_ref::<VarExpr>() {
-                                self.environment.assign(i.name.clone(), value.clone())?;
+                                let mut e = self.environment.clone();
+                                e.assign(self, i.name.clone(), value.clone())?;
+                                self.environment = e;
                             }
                             else if let Some(i) = expr.right.as_any().downcast_ref::<Get>() {
                                 let object = self.evaluate(&i.object)?;
                                 if let Some(Literal::Instance(mut v)) = object {
-                                    v.set(i.name.clone(), value.clone());
+                                    v.set(i.name.clone(), value.clone(), self);
                                     if let Some(as_var) = i.object.as_any().downcast_ref::<VarExpr>() {
-                                        self.environment.assign(as_var.name.clone(), Some(Literal::Instance(v.clone())))?;
+                                        let mut e = self.environment.clone();
+                                        e.assign(self, as_var.name.clone(), Some(Literal::Instance(v.clone())))?;
+                                        self.environment = e;
                                     }
                                     else if let Some(as_this) = i.object.as_any().downcast_ref::<This>() {
-                                        self.environment.assign(as_this.keyword.clone(), Some(Literal::Instance(v.clone())))?;
+                                        let mut e = self.environment.clone();
+                                        e.assign(self, as_this.keyword.clone(), Some(Literal::Instance(v.clone())))?;
+                                        self.environment = e;
                                     }
                                 }
                             }
@@ -1099,7 +1132,9 @@ impl ExprVisitor for Interpreter {
                                     }
                                 
                                     if let Some(as_var) = i.object.as_any().downcast_ref::<VarExpr>() {
-                                        self.environment.assign(as_var.name.clone(), Some(Literal::Collection(v.clone())))?;
+                                        let mut e = self.environment.clone();
+                                        e.assign(self, as_var.name.clone(), Some(Literal::Collection(v.clone())))?;
+                                        self.environment = e;
                                     }
                                 }
                             }
@@ -1120,17 +1155,23 @@ impl ExprVisitor for Interpreter {
                         if let Literal::Number(x) = val {
                             let value = Some(Literal::Number(x-1.0));
                             if let Some(i) = expr.right.as_any().downcast_ref::<VarExpr>() {
-                                self.environment.assign(i.name.clone(), value.clone())?;
+                                let mut e = self.environment.clone();
+                                e.assign(self, i.name.clone(), value.clone())?;
+                                self.environment = e;
                             }
                             else if let Some(i) = expr.right.as_any().downcast_ref::<Get>() {
                                 let object = self.evaluate(&i.object)?;
                                 if let Some(Literal::Instance(mut v)) = object {
-                                    v.set(i.name.clone(), value.clone());
+                                    v.set(i.name.clone(), value.clone(), self);
                                     if let Some(as_var) = i.object.as_any().downcast_ref::<VarExpr>() {
-                                        self.environment.assign(as_var.name.clone(), Some(Literal::Instance(v.clone())))?;
+                                        let mut e = self.environment.clone();
+                                        e.assign(self, as_var.name.clone(), Some(Literal::Instance(v.clone())))?;
+                                        self.environment = e;
                                     }
                                     else if let Some(as_this) = i.object.as_any().downcast_ref::<This>() {
-                                        self.environment.assign(as_this.keyword.clone(), Some(Literal::Instance(v.clone())))?;
+                                        let mut e = self.environment.clone();
+                                        e.assign(self, as_this.keyword.clone(), Some(Literal::Instance(v.clone())))?;
+                                        self.environment = e;
                                     }
                                 }
                             }
@@ -1146,7 +1187,9 @@ impl ExprVisitor for Interpreter {
                                     }
                                 
                                     if let Some(as_var) = i.object.as_any().downcast_ref::<VarExpr>() {
-                                        self.environment.assign(as_var.name.clone(), Some(Literal::Collection(v.clone())))?;
+                                        let mut e = self.environment.clone();
+                                        e.assign(self, as_var.name.clone(), Some(Literal::Collection(v.clone())))?;
+                                        self.environment = e;
                                     }
                                 }
                             }
@@ -1187,20 +1230,20 @@ impl ExprVisitor for Interpreter {
     }
     
     fn visit_var_expr(&mut self, expr : &VarExpr) -> RuntimeError<Option<Literal>> {
-        match self.environment.get(expr.name.clone())? {
+        match self.environment.get(self, expr.name.clone())? {
             Some(v) => Ok(Some(v)),
             None => Ok(None)
         }
     }
     
     fn visit_this_expr(&mut self, expr : &This) -> RuntimeError<Option<Literal>> {
-        self.environment.get(Token::new(TokenType::Identifier, "this", None, expr.keyword.line))
+        self.environment.get(self, Token::new(TokenType::Identifier, "this", None, expr.keyword.line))
     }
     
     fn visit_super_expr(&mut self, expr : &Super) -> RuntimeError<Option<Literal>> {
         let current_this = 
         match self.environment
-        .get(Token::new(TokenType::Identifier, "this", None, expr.keyword.line))? {
+        .get(self, Token::new(TokenType::Identifier, "this", None, expr.keyword.line))? {
             Some(Literal::Instance(v)) => v,
             _ => {
                 return Err((expr.keyword.clone(), "Could not find current this.".to_string()))
@@ -1232,9 +1275,11 @@ impl ExprVisitor for Interpreter {
     fn visit_assign_expr(&mut self, expr : &Assign) -> RuntimeError<Option<Literal>> {
         let value = self.evaluate(&expr.value)?.clone();
         
-        let new_value = Self::assign_helper(self.environment.get(expr.name.clone()), value.clone(), expr.assign_type.clone(), expr.name.clone())?;
-
-        self.environment.assign(expr.name.clone(), new_value.clone())?;
+        let new_value = Self::assign_helper(self.environment.get(self, expr.name.clone()), value.clone(), expr.assign_type.clone(), expr.name.clone())?;
+        
+        let mut e = self.environment.clone();
+        e.assign(self, expr.name.clone(), new_value.clone())?;
+        self.environment = e;
         Ok(new_value)
     }
     
@@ -1305,6 +1350,7 @@ impl ExprVisitor for Interpreter {
         };
         
         match self.environment.get(
+            self,
             function_val.clone().unwrap().get_name()
             ) {
             Ok(Some(Literal::Function(function))) => {
@@ -1384,26 +1430,32 @@ impl ExprVisitor for Interpreter {
                             
                             if let Some(caller) = v.object.as_any().downcast_ref::<VarExpr>() {
                                 if let Ok(Some(v)) = self.environment
-                                .get(Token::new(TokenType::Identifier, "this", None, 0)) {
+                                .get(self, Token::new(TokenType::Identifier, "this", None, 0)) {
                                     if let Some(prev) = self.environment.clone().enclosing {
                                         self.environment = *prev;
+                                        self.collect_garbage();
                                     }
-                                    self.environment.assign(caller.name.clone(), Some(v.clone()))?;
+                                    let mut e = self.environment.clone();
+                                    e.assign(self, caller.name.clone(), Some(v.clone()))?;
+                                    self.environment = e;
                                 }
                             }
                             else if let Some(caller) = v.object.as_any().downcast_ref::<IndexGet>() {
                                 if let Ok(Some(v2)) = self.environment
-                                .get(Token::new(TokenType::Identifier, "this", None, 0)) {
+                                .get(self, Token::new(TokenType::Identifier, "this", None, 0)) {
                                     if let Some(prev) = self.environment.clone().enclosing {
                                         self.environment = *prev;
+                                        self.collect_garbage();
                                     }
                                     
                                     if let Some(variable) = caller.object.as_any().downcast_ref::<VarExpr>() {
-                                        if let Some(Literal::Collection(mut coll)) = self.environment.get(variable.name.clone())? {
+                                        if let Some(Literal::Collection(mut coll)) = self.environment.get(self, variable.name.clone())? {
                                             if let Some(Literal::Number(index)) = self.evaluate(&caller.index)? {
                                                 let len = coll.len() as i32;
                                                 coll[((index as i32).rem_euclid(len)) as usize] = Box::new(Some(v2.clone()));
-                                                self.environment.assign(variable.name.clone(), Some(Literal::Collection(coll.clone())))?;
+                                                let mut e = self.environment.clone();
+                                                e.assign(self, variable.name.clone(), Some(Literal::Collection(coll.clone())))?;
+                                                self.environment = e;
                                             }
                                         }
                                     }
@@ -1441,26 +1493,32 @@ impl ExprVisitor for Interpreter {
                             
                             if let Some(caller) = v.object.as_any().downcast_ref::<VarExpr>() {
                                 if let Ok(Some(v)) = self.environment
-                                .get(Token::new(TokenType::Identifier, "this", None, 0)) {
+                                .get(self, Token::new(TokenType::Identifier, "this", None, 0)) {
                                     if let Some(prev) = self.environment.clone().enclosing {
                                         self.environment = *prev;
+                                        self.collect_garbage();
                                     }
-                                    self.environment.assign(caller.name.clone(), Some(v.clone()))?;
+                                    let mut e = self.environment.clone();
+                                    e.assign(self, caller.name.clone(), Some(v.clone()))?;
+                                    self.environment = e;
                                 }
                             }
                             else if let Some(caller) = v.object.as_any().downcast_ref::<IndexGet>() {
                                 if let Ok(Some(v2)) = self.environment
-                                .get(Token::new(TokenType::Identifier, "this", None, 0)) {
+                                .get(self, Token::new(TokenType::Identifier, "this", None, 0)) {
                                     if let Some(prev) = self.environment.clone().enclosing {
                                         self.environment = *prev;
+                                        self.collect_garbage();
                                     }
                                     
                                     if let Some(variable) = caller.object.as_any().downcast_ref::<VarExpr>() {
-                                        if let Some(Literal::Collection(mut coll)) = self.environment.get(variable.name.clone())? {
+                                        if let Some(Literal::Collection(mut coll)) = self.environment.get(self, variable.name.clone())? {
                                             if let Some(Literal::Number(index)) = self.evaluate(&caller.index)? {
                                                 let len = coll.len() as i32;
                                                 coll[((index as i32).rem_euclid(len)) as usize] = Box::new(Some(v2.clone()));
-                                                self.environment.assign(variable.name.clone(), Some(Literal::Collection(coll.clone())))?;
+                                                let mut e = self.environment.clone();
+                                                e.assign(self, variable.name.clone(), Some(Literal::Collection(coll.clone())))?;
+                                                self.environment = e;
                                             }
                                         }
                                     }
@@ -1496,20 +1554,24 @@ impl ExprVisitor for Interpreter {
                             let res = function.call(self, callee_token, arguments, false)?;
                             
                             if let Ok(Some(Literal::Instance(inst_old))) = self.environment
-                            .get(Token::new(TokenType::Identifier, "this", None, 0)) {
+                            .get(self, Token::new(TokenType::Identifier, "this", None, 0)) {
                                 if let Some(prev) = self.environment.clone().enclosing {
                                         self.environment = *prev;
+                                        self.collect_garbage();
                                     }
                                     
                                 if let Ok(Some(Literal::Instance(inst))) = self.environment
-                                .get(Token::new(TokenType::Identifier, "this", None, 0)) {
+                                .get(self, Token::new(TokenType::Identifier, "this", None, 0)) {
                                     let mut new_inst = inst;
                                     new_inst.fields = inst_old.fields.clone();
+                                    let mut e = self.environment.clone();
 
-                                    self.environment.assign(
+                                    e.assign(
+                                        self,
                                         Token::new(TokenType::Identifier, "this", None, 0),
                                         Some(Literal::Instance(new_inst))
                                     )?;
+                                    self.environment = e;
                                 }
                             }
                             
@@ -1566,13 +1628,17 @@ impl ExprVisitor for Interpreter {
             
             let new_value = Self::assign_helper(current_val.clone(), value.clone(), expr.assign_type.clone(), expr.name.clone())?;
             
-            v.set(expr.name.clone(), new_value.clone());
+            v.set(expr.name.clone(), new_value.clone(), self);
             
             if let Some(as_this) = expr.object.as_any().downcast_ref::<This>() {
-                self.environment.assign(as_this.keyword.clone(), Some(Literal::Instance(v.clone())))?;
+                let mut e = self.environment.clone();
+                e.assign(self, as_this.keyword.clone(), Some(Literal::Instance(v.clone())))?;
+                self.environment = e;
             }
             else if let Some(as_var) = expr.object.as_any().downcast_ref::<VarExpr>() {
-                self.environment.assign(as_var.name.clone(), Some(Literal::Instance(v.clone())))?;
+                let mut e = self.environment.clone();
+                e.assign(self, as_var.name.clone(), Some(Literal::Instance(v.clone())))?;
+                self.environment = e;
             }
 
             Ok(new_value)
@@ -1736,8 +1802,9 @@ impl ExprVisitor for Interpreter {
                     return Err((expr.name.clone(), "Attempt to index with non number type.".to_string()));
                 }
                 if !string_manip {
-                    self.environment.assign(as_var.name.clone(), Some(Literal::Collection(v.clone())))?;
-                
+                    let mut e = self.environment.clone();
+                    e.assign(self, as_var.name.clone(), Some(Literal::Collection(v.clone())))?;
+                    self.environment = e;
                     Ok(new_value)
                 }
                 else {
@@ -1747,8 +1814,9 @@ impl ExprVisitor for Interpreter {
                             new_str += s.as_str();
                         }
                     }
-                
-                    self.environment.assign(as_var.name.clone(), Some(Literal::String(new_str)))?;
+                    let mut e = self.environment.clone();
+                    e.assign(self, as_var.name.clone(), Some(Literal::String(new_str)))?;
+                    self.environment = e;
                 
                     Ok(new_value)
                 }
@@ -1797,13 +1865,17 @@ impl ExprVisitor for Interpreter {
                 }
                 
                 if let Some(Literal::Instance(mut inst)) = self.evaluate(&as_get.object)? {
-                    inst.set(as_get.name.clone(), Some(Literal::Collection(v.clone())));
+                    inst.set(as_get.name.clone(), Some(Literal::Collection(v.clone())), self);
 
                     if let Some(as_this) = as_get.object.as_any().downcast_ref::<This>() {
-                        self.environment.assign(as_this.keyword.clone(), Some(Literal::Instance(inst.clone())))?;
+                        let mut e = self.environment.clone();
+                        e.assign(self, as_this.keyword.clone(), Some(Literal::Instance(inst.clone())))?;
+                        self.environment = e;
                     }
                     else if let Some(as_var) = as_get.object.as_any().downcast_ref::<VarExpr>() {
-                        self.environment.assign(as_var.name.clone(), Some(Literal::Instance(inst.clone())))?;
+                        let mut e = self.environment.clone();
+                        e.assign(self, as_var.name.clone(), Some(Literal::Instance(inst.clone())))?;
+                        self.environment = e;
                     }
                 }
                 
