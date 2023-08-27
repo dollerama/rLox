@@ -1,5 +1,7 @@
 use std::any::Any;
 use rand::prelude::*;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 use crate::types::*;
 use crate::tokens::*;
@@ -47,6 +49,108 @@ macro_rules! native_function {
 }
 
 pub const STD_LIB_SCRIPT: &str = "
+    class Entry {
+        Entry(key, val) {
+            this.key = key;
+            this.val = val;
+            this.next = nil;
+        }
+    }
+
+    class Hashmap {
+        Hashmap() {
+            this.buckets = [];
+            for i < 16 {
+                this.buckets += nil;
+            }
+            this.size = 0;
+            this.capacity = 16;
+        }
+
+        resize() {
+            var new_capacity = this.capacity*2;
+            var new_table = [];
+            for i < this.capacity {
+                new_table += nil;
+            }
+            for i < this.capacity {
+                var node = new_table[i];
+                while node != null {
+                    var next = node.next;
+                    var index = hashcode(key)%this.capacity;
+                    node.next = new_table[index];
+                    new_table[index] = node;
+                    node = next;
+                }
+            }
+
+            this.buckets = new_table;
+            this.capacity = new_capacity;
+        }
+        
+        insert(key, value) {
+            var new_entry = Entry(key, value);
+            var hash = hashcode(key)%this.capacity;
+
+            if this.buckets[hash] == nil {
+                this.buckets[hash] = new_entry;
+            }
+            else {
+                var head = this.buckets[hash];
+                this.buckets[hash] = head;
+
+                while head != nil {
+                    if head.key == key {
+                        head.value = value;
+                        return nil;
+                    }
+                    head = head.next;
+                }
+                new_entry.next = this.buckets[hash];
+                this.buckets[hash] = new_entry;
+                this.size++;
+                if this.size > this.capacity * 0.75 {
+                    this.resize();
+                }
+            }
+        }
+
+        remove(key) {
+            var index = hashcode(key)%this.capacity;
+            var node = this.buckets[index];
+            var prev = nil;
+            while node != nil {
+                if node.key == key {
+                    if prev == nil {
+                        this.buckets[index] = node.next;
+                    }
+                    else {
+                        prev.next = node.next;
+                    }
+                    this.size--;
+                    return;
+                }
+                prev = node;
+                node = node.next;
+            }
+        }
+
+        get(key) {
+            var hash = hashcode(key)%this.capacity;
+            var head = this.buckets[hash];
+
+            while head != nil {
+                if head.key == key {
+                    break;
+                    return head.val;
+                }
+                head = head.next;
+            }
+
+            return nil;
+        }
+    }
+
     class Stack {
         Stack() {
             this.items = [];
@@ -129,6 +233,24 @@ native_function! {
             }
             else {
                 Ok(None)
+            }
+        }
+    }
+
+    HashFunction "hashcode", 1 => {
+        fn call(&self, _interpreter : &mut Interpreter, callee : Token, arguments : Vec<Option<Literal>>, _auto_clean : bool) -> RuntimeError<Option<Literal>> {
+            match arguments[0].clone() {
+                Some(Literal::Number(x)) => {
+                    let mut s = DefaultHasher::new();
+                    (x as i32).hash(&mut s);
+                    Ok(Some(Literal::Number(s.finish() as f64)))
+                }
+                Some(Literal::String(x)) => {
+                    let mut s = DefaultHasher::new();
+                    x.hash(&mut s);
+                    Ok(Some(Literal::Number(s.finish() as f64)))
+                }
+                _ => Err((callee.clone(), "Invalid hashcode input.".to_string()))
             }
         }
     }

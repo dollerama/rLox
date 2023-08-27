@@ -25,25 +25,25 @@ impl Interpreter {
     }
 
     pub fn collect_garbage(&mut self) {
-        let mut found : Vec<usize> = Vec::new();
+        // let mut found : Vec<usize> = Vec::new();
 
-        for v in &self.environment.values {
-            if let Some(Literal::Instance(i)) = v.1 {
-                if let Some(a) = i.address {
-                    if self.references.get(a).is_some() {
-                        found.push(a);
-                    }
-                }
-            }
-        }
+        // for v in &self.environment.values {
+        //     if let Some(Literal::Instance(i)) = v.1 {
+        //         if let Some(a) = i.address {
+        //             if self.references.get(a).is_some() {
+        //                 found.push(a);
+        //             }
+        //         }
+        //     }
+        // }
         
-        let mut new_refs = Vec::new();
-        for i in 0..self.references.len() {
-            if found.get(i).is_some() {
-                new_refs.push(self.references[i].clone());
-            }
-        }
-        self.references = new_refs;
+        // let mut new_refs = Vec::new();
+        // for i in 0..self.references.len() {
+        //     if found.get(i).is_some() {
+        //         new_refs.push(self.references[i].clone());
+        //     }
+        // }
+        // self.references = new_refs;
     }
 
     pub fn insert_value(&mut self, name : &str, value : Literal) {
@@ -522,7 +522,8 @@ impl Interpreter {
                         return_val = Some(Literal::Keyword(v2));
                     }
                     else if let Some(Literal::Return(v2)) = v {
-                        return_val = Some(*v2);
+                        return_val = Some(Literal::Return(v2));
+                        break;
                     }
                     else {
                         continue;
@@ -558,8 +559,10 @@ impl StmtVisitor for Interpreter {
                 (Some(Literal::String(x)), TokenType::String) => value = Some(Literal::StrongString(x)),
                 (Some(Literal::StrongString(_)), TokenType::String) => {}
                 (Some(_), TokenType::Var) => { },
-                _ => return Err((stmt.name.clone(), "Invalid variable declaration.".to_string()))
+                (None, TokenType::Var) => { },
+                _ => return Err((stmt.binding.clone(), "Invalid variable declaration.".to_string()))
             }
+
             let mut e = self.environment.clone();
             e.define(self, stmt.name.lexeme.clone(), value);
             self.environment = e;
@@ -646,6 +649,7 @@ impl StmtVisitor for Interpreter {
     }
     
     fn visit_while_stmt(&mut self, stmt : &While) -> RuntimeError<Option<Literal>> {
+        let mut return_val = None;
         'main : loop {
             let eval = self.evaluate(&stmt.condition)?;
 
@@ -668,6 +672,9 @@ impl StmtVisitor for Interpreter {
                                         _ => { }
                                     }
                                 },
+                                Ok(Some(Literal::Return(r))) => { 
+                                    return Ok(Some(Literal::Return(r)));
+                                }
                                 Err(e) => {
                                     return Err(e);
                                 },
@@ -697,6 +704,9 @@ impl StmtVisitor for Interpreter {
                                     _ => { }
                                 }
                             },
+                            Ok(Some(Literal::Return(r))) => { 
+                                return Ok(Some(Literal::Return(r)));
+                            }
                             Err(e) => {
                                 return Err(e);
                             },
@@ -709,7 +719,7 @@ impl StmtVisitor for Interpreter {
                 }
             }
         }
-        Ok(None)
+        Ok(return_val)
     }
     
     fn visit_function_stmt(&mut self, stmt : &Function) -> RuntimeError<Option<Literal>> {
@@ -733,7 +743,6 @@ impl StmtVisitor for Interpreter {
                 Err((e, v)) => return Err((e, v))
             }
         }
-        
         Ok(value)
     }
     
@@ -1425,18 +1434,18 @@ impl ExprVisitor for Interpreter {
                             ))
                         }
                         else {
-                            //let previous = self.environment.clone();
                             let res = f.call(self, callee_token, arguments, false)?;
                             
                             if let Some(caller) = v.object.as_any().downcast_ref::<VarExpr>() {
-                                if let Ok(Some(v)) = self.environment
+                                if let Ok(Some(v2)) = self.environment
                                 .get(self, Token::new(TokenType::Identifier, "this", None, 0)) {
                                     if let Some(prev) = self.environment.clone().enclosing {
                                         self.environment = *prev;
                                         self.collect_garbage();
                                     }
+                                    
                                     let mut e = self.environment.clone();
-                                    e.assign(self, caller.name.clone(), Some(v.clone()))?;
+                                    e.assign(self, caller.name.clone(), Some(v2.clone()))?;
                                     self.environment = e;
                                 }
                             }
@@ -1661,7 +1670,22 @@ impl ExprVisitor for Interpreter {
             if let Some(Literal::Collection(c)) = self.evaluate(&expr.object)? {
                 if let Some(Literal::Number(index)) = self.evaluate(&expr.index)? {
                     if c.len() > 0 {
-                        Ok(*c[((index as i32).rem_euclid(c.len() as i32)) as usize].clone())
+                        if let Some(Literal::Instance(i)) = *c[((index as i32).rem_euclid(c.len() as i32)) as usize].clone() {
+                            if let Some(address) = i.address {
+                                if let Some(a) = self.references.get(address) {
+                                    Ok(a.clone())
+                                }       
+                                else {
+                                    Err((expr.keyword.clone(), format!("Undefined reference.")))
+                                }
+                            }  
+                            else {
+                                Err((expr.keyword.clone(), format!("Undefined reference.")))
+                            }                       
+                        }
+                        else {
+                            Ok(*c[((index as i32).rem_euclid(c.len() as i32)) as usize].clone())
+                        }
                     }
                     else {
                         Err((expr.keyword.clone(), "Attempt to index empty collection.".to_string()))
@@ -1669,7 +1693,22 @@ impl ExprVisitor for Interpreter {
                 }
                 else if let Some(Literal::StrongNumber(index)) = self.evaluate(&expr.index)? {
                     if c.len() > 0 {
-                        Ok(*c[((index as i32).rem_euclid(c.len() as i32)) as usize].clone())
+                        if let Some(Literal::Instance(i)) = *c[((index as i32).rem_euclid(c.len() as i32)) as usize].clone() {
+                            if let Some(address) = i.address {
+                                if let Some(a) = self.references.get(address) {
+                                    Ok(a.clone())
+                                }       
+                                else {
+                                    Err((expr.keyword.clone(), format!("Undefined reference.")))
+                                }
+                            }  
+                            else {
+                                Err((expr.keyword.clone(), format!("Undefined reference.")))
+                            }                       
+                        }
+                        else {
+                            Ok(*c[((index as i32).rem_euclid(c.len() as i32)) as usize].clone())
+                        }
                     }
                     else {
                         Err((expr.keyword.clone(), "Attempt to index empty collection.".to_string()))
@@ -1696,7 +1735,22 @@ impl ExprVisitor for Interpreter {
             if let Some(Literal::Collection(c)) =  object {
                 if let Some(Literal::Number(index)) = self.evaluate(&expr.index)? {
                     if c.len() > 0 {
-                        Ok(*c[((index as i32).rem_euclid(c.len() as i32)) as usize].clone())
+                        if let Some(Literal::Instance(i)) = *c[((index as i32).rem_euclid(c.len() as i32)) as usize].clone() {
+                            if let Some(address) = i.address {
+                                if let Some(a) = self.references.get(address) {
+                                    Ok(a.clone())
+                                }       
+                                else {
+                                    Err((expr.keyword.clone(), format!("Undefined reference.")))
+                                }
+                            }  
+                            else {
+                                Err((expr.keyword.clone(), format!("Undefined reference.")))
+                            }                       
+                        }
+                        else {
+                            Ok(*c[((index as i32).rem_euclid(c.len() as i32)) as usize].clone())
+                        }
                     }
                     else {
                         Err((expr.keyword.clone(), "Attempt to index empty collection.".to_string()))
@@ -1704,7 +1758,22 @@ impl ExprVisitor for Interpreter {
                 }
                 else if let Some(Literal::StrongNumber(index)) = self.evaluate(&expr.index)? {
                     if c.len() > 0 {
-                        Ok(*c[((index as i32).rem_euclid(c.len() as i32)) as usize].clone())
+                        if let Some(Literal::Instance(i)) = *c[((index as i32).rem_euclid(c.len() as i32)) as usize].clone() {
+                            if let Some(address) = i.address {
+                                if let Some(a) = self.references.get(address) {
+                                    Ok(a.clone())
+                                }       
+                                else {
+                                    Err((expr.keyword.clone(), format!("Undefined reference.")))
+                                }
+                            }  
+                            else {
+                                Err((expr.keyword.clone(), format!("Undefined reference.")))
+                            }                       
+                        }
+                        else {
+                            Ok(*c[((index as i32).rem_euclid(c.len() as i32)) as usize].clone())
+                        }
                     }
                     else {
                         Err((expr.keyword.clone(), "Attempt to index empty collection.".to_string()))

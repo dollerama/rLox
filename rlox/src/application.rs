@@ -102,6 +102,7 @@ impl App {
         self.interpreter.insert_function(function_container!(LenFunction));
         self.interpreter.insert_function(function_container!(ClockFunction));
         self.interpreter.insert_function(function_container!(RandomFunction));
+        self.interpreter.insert_function(function_container!(HashFunction));
         self.interpreter.insert_value("PI", 3.14159265359.into());
 
         let mut scanner = Scanner::new(String::from(STD_LIB_SCRIPT));

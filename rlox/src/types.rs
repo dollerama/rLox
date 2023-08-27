@@ -376,7 +376,12 @@ impl LoxCallable for LoxFunction {
                 interpreter.collect_garbage();
             }
             
-            Ok(res)
+            if let Some(Literal::Return(v)) = res {
+                Ok(Some(*v))
+            }
+            else {
+                Ok(None)
+            }
         }
     }
     
