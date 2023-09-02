@@ -103,6 +103,7 @@ impl App {
         self.interpreter.insert_function(function_container!(ClockFunction));
         self.interpreter.insert_function(function_container!(RandomFunction));
         self.interpreter.insert_function(function_container!(HashFunction));
+        self.interpreter.insert_function(function_container!(CollectFunction));
         self.interpreter.insert_value("PI", 3.14159265359.into());
 
         let mut scanner = Scanner::new(String::from(STD_LIB_SCRIPT));
@@ -124,7 +125,7 @@ impl App {
         let statements = parser.parse()?;
         
         self.interpreter.interpret(statements)?;
-
+        println!("{}", self.interpreter.get_ref_count());
         self.final_environment = Some(self.interpreter.environment.clone());
         Ok(())
     }

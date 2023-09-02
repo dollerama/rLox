@@ -373,7 +373,6 @@ impl LoxCallable for LoxFunction {
                 if let Some(prev) = interpreter.environment.clone().enclosing {
                     interpreter.environment = *prev;
                 }
-                interpreter.collect_garbage();
             }
             
             if let Some(Literal::Return(v)) = res {

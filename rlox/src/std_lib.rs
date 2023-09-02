@@ -127,7 +127,7 @@ pub const STD_LIB_SCRIPT: &str = "
                     else {
                         prev.next = node.next;
                     }
-                    this.size--;
+                    this.size = (this.size-1 < 0) ? 0 : this.size-1;
                     return;
                 }
                 prev = node;
@@ -200,6 +200,13 @@ native_function! {
     DebugFunction "debug", 1 => {
         fn call(&self, _interpreter : &mut Interpreter, _callee : Token, arguments : Vec<Option<Literal>>, _auto_clean : bool) -> RuntimeError<Option<Literal>> {
             println!("{:#?}", arguments[0].clone());
+            Ok(None)
+        }
+    }
+
+    CollectFunction "collect_garbage", 0 => {
+        fn call(&self, interpreter : &mut Interpreter, _callee : Token, _arguments : Vec<Option<Literal>>, _auto_clean : bool) -> RuntimeError<Option<Literal>> {
+            interpreter.collect_garbage();
             Ok(None)
         }
     }
