@@ -14,6 +14,13 @@ num n = 2.0;
 string s = "hello";
 bool b = true;
 ```
+### List
+```rust
+var l = [0,1,2,3,4];
+var l2 = [true, false, [0,2,3]];
+var length_of_l = #l;
+var l_reversed = !l;
+```
 ## Conditionals
 ```rust
 if a == 2 {
@@ -42,7 +49,7 @@ for i < 5 {
     println(i);
 }
 ```
-when looping through a list you will have a read-only slice the list and the index for mutations. the index is the specified slice name plus "_iter" in this case "i_iter".
+when looping through a list you will have a read-only slice of the list and the index for mutations. the index is the specified slice name plus "_iter" in this case "i_iter".
 ```rust 
 var d = [1,2,3];
 
