@@ -5,7 +5,7 @@ An implimentation of the Lox tree walk interpreter from https://craftinginterpre
 # Language
 
 ## Variables
-```lox
+```rust
 var a = 1;
 a = true;
 a = "hello";
@@ -15,7 +15,7 @@ string s = "hello";
 bool b = true;
 ```
 ## Conditionals
-```lox
+```rust
 if a == 2 {
     println("a equals 2");
 }
