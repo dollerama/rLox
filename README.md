@@ -4,8 +4,25 @@ An implimentation of the Lox tree walk interpreter from https://craftinginterpre
 
 # Language
 
-## Conditional
-
-`if a == 2 {
+## Variables
+```
+var a = 1;
+a = true;
+a = "hello";
+num n = 2.0;
+//n = "hello"; **error
+string s = "hello";
+bool b = true;
+```
+## Conditionals
+```
+if a == 2 {
     println("a equals 2");
-}`
+}
+else if a == 3 {
+    printl("a equals 3");
+}
+else {
+    println("default");
+}
+```
