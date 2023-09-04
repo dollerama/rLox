@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::{fs, env};
 use std::io;
 use std::io::Write;
@@ -125,7 +126,6 @@ impl App {
         let statements = parser.parse()?;
         
         self.interpreter.interpret(statements)?;
-        println!("{}", self.interpreter.get_ref_count());
         self.final_environment = Some(self.interpreter.environment.clone());
         Ok(())
     }
@@ -157,6 +157,38 @@ impl App {
             }
             _ => None
         }
+    }
+
+    pub fn get_field<T : TryFrom<Literal>>(&self, name : &str, field : &str) -> Result<T, &'static str> {
+        match self.get_fields(name) {
+            Ok(fields) => {
+                match fields.get(field) {
+                    Some(f) => {
+                        match T::try_from(f.clone()) {
+                            Ok(v) => Ok(v),
+                            Err(_) => Err("Unable to get value from instance.")
+                        }
+                    }
+                    None => Err("Unable to get value from instance.")
+                }
+            }
+            Err(e) => Err(e)
+        }
+    }
+
+    pub fn get_fields(&self, name : &str) -> Result<HashMap<String, Literal>, &'static str> {
+        if let Some(Literal::Instance(i)) =  self.get_value_raw(name) {
+            let mut mapping = HashMap::new();
+            for field in i.fields {
+                if let Some(f) = field.1 {
+                    mapping.insert(field.0, f);
+                }
+            }            
+            Ok(mapping)
+        }
+        else {
+            Err("Non instance value.")
+        } 
     }
 
     pub fn get_vec<T : TryFrom<Literal>>(&self, name : &str) -> Result<Vec<T>, &'static str> {

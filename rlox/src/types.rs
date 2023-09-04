@@ -162,6 +162,22 @@ impl TryFrom<Literal> for i32 {
     }
 }
 
+impl TryFrom<&Literal> for i32 {
+    type Error = &'static str;
+
+    fn try_from(v: &Literal) -> Result<Self, Self::Error> {
+        if let Literal::Number(x) = v {
+            Ok(*x as i32)
+        }
+        else if let Literal::StrongNumber(x) = v {
+            Ok(*x as i32)
+        }
+        else {
+            Err("Cannot cast Literal to i32")
+        }
+    }
+}
+
 impl TryFrom<Literal> for i64 {
     type Error = &'static str;
 
@@ -194,6 +210,22 @@ impl TryFrom<Literal> for f32 {
     }
 }
 
+impl TryFrom<&Literal> for f32 {
+    type Error = &'static str;
+
+    fn try_from(v: &Literal) -> Result<Self, Self::Error> {
+        if let Literal::Number(x) = v {
+            Ok(*x as f32)
+        }
+        else if let Literal::StrongNumber(x) = v {
+            Ok(*x as f32)
+        }
+        else {
+            Err("Cannot cast Literal to i64")
+        }
+    }
+}
+
 impl TryFrom<Literal> for f64 {
     type Error = &'static str;
 
@@ -203,6 +235,22 @@ impl TryFrom<Literal> for f64 {
         }
         else if let Literal::StrongNumber(x) = v {
             Ok(x)
+        }
+        else {
+            Err("Cannot cast Literal to i64")
+        }
+    }
+}
+
+impl TryFrom<&Literal> for f64 {
+    type Error = &'static str;
+
+    fn try_from(v: &Literal) -> Result<Self, Self::Error> {
+        if let Literal::Number(x) = v {
+            Ok(*x)
+        }
+        else if let Literal::StrongNumber(x) = v {
+            Ok(*x)
         }
         else {
             Err("Cannot cast Literal to i64")
@@ -235,6 +283,22 @@ impl TryFrom<Literal> for bool {
         }
         else if let Literal::StrongBoolean(x) = v {
             Ok(x)
+        }
+        else {
+            Err("Cannot cast Literal to bool")
+        }
+    }
+}
+
+impl TryFrom<&Literal> for bool {
+    type Error = &'static str;
+
+    fn try_from(v: &Literal) -> Result<Self, Self::Error> {
+        if let Literal::Boolean(x) = v {
+            Ok(*x)
+        }
+        else if let Literal::StrongBoolean(x) = v {
+            Ok(*x)
         }
         else {
             Err("Cannot cast Literal to bool")

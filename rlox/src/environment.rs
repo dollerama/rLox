@@ -33,14 +33,8 @@ impl Environment {
     pub fn define(&mut self, i : &mut Interpreter, name : String, value : Option<Literal>) {
         if let Some(Literal::Instance(x)) = value.clone() {
             if let Some(a) = x.address {
-                if let Some(r) = i.references.get(a) {
+                if i.references.get(a).is_some() {
                     self.values.insert(name.clone(), Some(Literal::Instance(x.clone())));
-                }
-                else {
-                    let mut new_i = x.clone();
-                    new_i.address = Some(i.references.len());
-                    i.references.push(Some(Literal::Instance(new_i.clone())));
-                    self.values.insert(name.clone(), Some(Literal::Instance(new_i.clone()))); 
                 }
             }
             else {
