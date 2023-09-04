@@ -1,6 +1,6 @@
 # Lox
 
-An implimentation of the Lox tree walk interpreter from https://craftinginterpreters.com/ in Rust. Some syntax was changed and features added.
+An implimentation of the Lox tree walk interpreter from https://craftinginterpreters.com/ in Rust. After completing the base implimentation I changed some syntax and added some features.
 
 # Language
 
