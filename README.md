@@ -15,6 +15,7 @@ string s = "hello";
 bool b = true;
 ```
 ### List
+List can be nested and jagged. List may also contain multiple types.
 ```rust
 var l = [0,1,2,3,4];
 var l2 = [true, false, [0,2,3]];
@@ -57,4 +58,32 @@ for i in d {
     println(i);
     d[i_iter] += 5;
 }
+```
+## Functions
+Functions are declared with fn and parameters may be restricted to type using var : type syntax.
+```rust
+fn hello_fun(msg : string) {
+    return "Hello "+msg;
+}
+
+var c = hello_fun("World"); // c = "Hello World"
+
+var hello = hello_fun;
+var d = hello("World2");
+```
+Anonymous functions will automatically return when they're only one statement
+```rust
+var a => |a, b| a+b;
+
+var cmp => |a, b| {
+    if a < b {
+        return false;
+    }
+    else {
+        return true;
+    }
+};
+
+var b = a(2,5);
+var bb = cmp(b, 3);
 ```

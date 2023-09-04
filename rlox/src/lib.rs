@@ -97,7 +97,7 @@ mod tests {
     fn functions() {
         let mut lox = App::new();
         lox.run("
-        fn hello_fun(msg) {
+        fn hello_fun(msg : string) {
             return \"Hello \"+msg;
         }
 
