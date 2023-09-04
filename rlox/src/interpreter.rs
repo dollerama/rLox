@@ -174,6 +174,34 @@ impl Interpreter {
                                         }
                                         Ok(Some(Literal::Collection(x)))
                                     },
+                                    (Some(Literal::String(mut x)), Some(Literal::Number(y))) => {
+                                        let len = x.len() as i32;
+                                        if len > 0 {
+                                            x.remove((y as i32).rem_euclid(len) as usize);
+                                        }
+                                        Ok(Some(Literal::String(x)))
+                                    }
+                                    (Some(Literal::String(mut x)), Some(Literal::StrongNumber(y))) => {
+                                        let len = x.len() as i32;
+                                        if len > 0 {
+                                            x.remove((y as i32).rem_euclid(len) as usize);
+                                        }
+                                        Ok(Some(Literal::String(x)))
+                                    }
+                                    (Some(Literal::StrongString(mut x)), Some(Literal::Number(y))) => {
+                                        let len = x.len() as i32;
+                                        if len > 0 {
+                                            x.remove((y as i32).rem_euclid(len) as usize);
+                                        }
+                                        Ok(Some(Literal::String(x)))
+                                    }
+                                    (Some(Literal::StrongString(mut x)), Some(Literal::StrongNumber(y))) => {
+                                        let len = x.len() as i32;
+                                        if len > 0 {
+                                            x.remove((y as i32).rem_euclid(len) as usize);
+                                        }
+                                        Ok(Some(Literal::String(x)))
+                                    }
                                     _ => {
                                         Err((name.clone(), "Operands must be Numbers.".to_string()))
                                     }
@@ -528,6 +556,7 @@ impl Interpreter {
                     Literal::Boolean(x) => Some(Literal::Boolean(!x)),
                     Literal::StrongBoolean(x) => Some(Literal::StrongBoolean(!x)),
                     Literal::Collection(x) => Some(Literal::Collection(x.into_iter().rev().collect())),
+                    Literal::String(s) => Some(Literal::String(s.chars().rev().collect::<String>())),
                     _ => Some(Literal::Boolean(false))
                 }
             }
